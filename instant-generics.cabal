@@ -33,5 +33,9 @@ exposed-modules:        Generics.Instant,
                         Generics.Instant.Functions,
                         Generics.Instant.Functions.Show,
                         Generics.Instant.Functions.Empty,
-                        Generics.Instant.Functions.Eq
+                        Generics.Instant.Functions.Eq,
+                        Generics.Instant.Functions.Update
+extensions:             FlexibleContexts, FlexibleInstances,
+                        TypeSynonymInstances, TypeFamilies, TypeOperators,
+                        OverlappingInstances
 hs-source-dirs:         src

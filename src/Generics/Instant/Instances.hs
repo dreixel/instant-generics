@@ -1,8 +1,4 @@
 {-# LANGUAGE EmptyDataDecls        #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TypeFamilies          #-}
-{-# LANGUAGE TypeOperators         #-}
 {-# OPTIONS -fno-warn-orphans      #-}
 
 -----------------------------------------------------------------------------
