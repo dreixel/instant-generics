@@ -14,7 +14,10 @@
 --
 -----------------------------------------------------------------------------
 
-module Generics.Instant.Functions.Empty (Empty(..), empty) where
+module Generics.Instant.Functions.Empty (
+    Empty(..), empty,
+    HasRec(..)
+  ) where
 
 import Generics.Instant.Base
 import Generics.Instant.Instances ()
@@ -74,7 +77,8 @@ instance (Empty a, Empty b) => Empty (a,b)  where empty' = empty
 
 
 --------------------------------------------------------------------------------
--- Used to avoid producing infinite values
+-- | We use 'HasRec' to check for recursion in the structure. This is used 
+-- to avoid selecting a recursive branch in the sum case for 'Empty'.
 class HasRec a where
   hasRec' :: a -> Bool
   hasRec' _ = False

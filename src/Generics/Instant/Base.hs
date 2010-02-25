@@ -10,8 +10,29 @@
 -- Portability :  non-portable
 --
 -- This module defines the basic representation types and the conversion
--- functions 'to' and 'from'.
---
+-- functions 'to' and 'from'. A typical instance for a user-defined datatype
+-- would be:
+-- 
+-- > -- Example datatype
+-- > data Exp = Const Int | Plus Exp Exp
+-- >
+-- > -- Auxiliary datatypes for constructor representations
+-- > data Const
+-- > data Plus
+-- > 
+-- > instance Constructor Const where conName _ = "Const"
+-- > instance Constructor Plus  where conName _ = "Plus"
+-- > 
+-- > -- Representable instance
+-- > instance Representable Exp where
+-- >   type Rep Exp = C Const (Var Int) :+: C Plus (Rec Exp :*: Rec Exp)
+-- > 
+-- >   from (Const n)   = L (C (Var n))
+-- >   from (Plus e e') = R (C (Rec e :*: Rec e'))
+-- > 
+-- >   to (L (C (Var n)))            = Const n
+-- >   to (R (C (Rec e :*: Rec e'))) = Plus e e'
+-- 
 -----------------------------------------------------------------------------
 
 module Generics.Instant.Base (

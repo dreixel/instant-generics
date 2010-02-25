@@ -42,6 +42,7 @@ instance Update a => Update (Rec a) where
 instance (MapOn a) => Update (Var a) where
   update' (Var x) = Var (mapOn x)
 
+-- | This is the function that is applied by 'update' at 'Var' positions.
 class MapOn a where
   mapOn :: a -> a
   mapOn = id

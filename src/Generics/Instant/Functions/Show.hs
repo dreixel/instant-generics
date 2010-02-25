@@ -9,7 +9,7 @@
 -- Stability   :  experimental
 -- Portability :  non-portable
 --
--- Generic show function.
+-- Simplified generic show function.
 --
 -----------------------------------------------------------------------------
 

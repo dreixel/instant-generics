@@ -8,7 +8,7 @@
 -- Stability   :  experimental
 -- Portability :  non-portable
 --
--- Top-level module which reexports the basic combinators and the generic
+-- Top-level module which re-exports the basic combinators and the generic
 -- instances for common datatypes.
 --
 -----------------------------------------------------------------------------
