@@ -7,7 +7,7 @@ license-file:           LICENSE
 author:                 Manuel Chakravarty, Gabriel Ditu, Roman Leshchinskiy,
                         Jose Pedro Magalhaes
 maintainer:             generics@haskell.org
-synopsis:               Generic programming library with a Sum of Products view
+synopsis:               Generic programming library with a sum of products view
 description:               
 
   This is a generic programming library based on type classes and type families
@@ -16,26 +16,33 @@ description:
   is a simplified version mostly to support the rewriting library described 
   in the paper:
   .
-  *  /A Lightweight Approach to Datatype-Generic Rewriting./
-     Thomas van Noort, Alexey Rodriguez Yakushev, Stefan Holdermans, 
+  *  Thomas van Noort, Alexey Rodriguez Yakushev, Stefan Holdermans, 
      Johan Jeuring, Bastiaan Heeren, Jose Pedro Magalhaes.
+     /A Lightweight Approach to Datatype-Generic Rewriting./
      Journal of Functional Programming, Special Issue on Generic Programming, 
      2010.
 
-stability:              provisional
+stability:              experimental
 build-type:             Simple
-cabal-version:          >= 1.2.1
-ghc-options:            -Wall
-build-depends:          base >= 3.0 && < 5
-exposed-modules:        Generics.Instant,
-                        Generics.Instant.Base,
-                        Generics.Instant.Instances,
-                        Generics.Instant.Functions,
-                        Generics.Instant.Functions.Show,
-                        Generics.Instant.Functions.Empty,
-                        Generics.Instant.Functions.Eq,
-                        Generics.Instant.Functions.Update
-extensions:             FlexibleContexts, FlexibleInstances,
-                        TypeSynonymInstances, TypeFamilies, TypeOperators,
-                        OverlappingInstances
-hs-source-dirs:         src
+homepage:               http://www.cs.uu.nl/wiki/GenericProgramming/InstantGenerics
+cabal-version:          >= 1.2.3
+tested-with:            GHC == 6.8.3, GHC == 6.10.4, GHC == 6.12.1
+extra-source-files:     examples/GMapAssoc.hs
+                        examples/Test.hs
+                        CREDITS
+
+
+library
+  hs-source-dirs:         src
+  build-depends:          base >= 3.0 && < 5
+  exposed-modules:        Generics.Instant,
+                          Generics.Instant.Base,
+                          Generics.Instant.Instances,
+                          Generics.Instant.Functions,
+                          Generics.Instant.Functions.Show,
+                          Generics.Instant.Functions.Empty,
+                          Generics.Instant.Functions.Eq
+  extensions:             FlexibleContexts, FlexibleInstances,
+                          TypeSynonymInstances, TypeFamilies, TypeOperators,
+                          OverlappingInstances
+  ghc-options:            -Wall

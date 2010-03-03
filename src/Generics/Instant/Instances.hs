@@ -11,8 +11,8 @@
 -- Stability   :  experimental
 -- Portability :  non-portable
 --
--- This module defines instances of the Representable class for a number of basic
--- Prelude types.
+-- This module defines instances of the 'Representable' class for a number of
+-- basic Prelude types.
 --
 -----------------------------------------------------------------------------
 

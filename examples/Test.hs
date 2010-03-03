@@ -50,13 +50,13 @@ instance P.Show Exp where show = show -- convenience
 
 testExp3 :: String
 testExp3 = show exp2
-
+{-
 instance Update Exp where update' = update
 instance MapOn Int where mapOn = (+1)
 
 testExp4 :: Exp
 testExp4 = update exp2
-
+-}
 -------------------------------------------------------------------------------
 -- Mutually recursive datatypes
 -------------------------------------------------------------------------------
@@ -135,7 +135,7 @@ instance Eq Decl where eq' = eq
 
 testAST4 :: Bool
 testAST4 = eq expr expr
-
+{-
 instance Update Decl where update' = update
 instance Update Expr where update' = update
 instance MapOn [Char] where mapOn _ = "a"
@@ -145,3 +145,4 @@ testAST5 = update decls
 
 testAST6 :: Expr
 testAST6 = update expr
+-}
