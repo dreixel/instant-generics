@@ -29,8 +29,6 @@ cabal-version:          >= 1.2.3
 tested-with:            GHC == 6.8.3, GHC == 6.10.4, GHC == 6.12.1
 extra-source-files:     examples/GMapAssoc.hs
                         examples/Test.hs
-                        CREDITS
-
 
 library
   hs-source-dirs:         src
