@@ -1,3 +1,7 @@
+{-# LANGUAGE TypeOperators            #-}
+{-# LANGUAGE FlexibleInstances        #-}
+{-# LANGUAGE FlexibleContexts         #-}
+{-# LANGUAGE OverlappingInstances     #-}
 
 -----------------------------------------------------------------------------
 -- |

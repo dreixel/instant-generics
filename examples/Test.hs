@@ -1,10 +1,13 @@
-{-# LANGUAGE TypeFamilies           #-}
-{-# LANGUAGE TypeOperators          #-}
-{-# LANGUAGE FlexibleInstances      #-}
-{-# LANGUAGE MultiParamTypeClasses  #-}
-{-# LANGUAGE EmptyDataDecls         #-}
+{-# LANGUAGE TypeFamilies             #-}
+{-# LANGUAGE TypeOperators            #-}
+{-# LANGUAGE FlexibleInstances        #-}
+{-# LANGUAGE MultiParamTypeClasses    #-}
+{-# LANGUAGE EmptyDataDecls           #-}
+{-# LANGUAGE TemplateHaskell          #-}
+{-# LANGUAGE OverlappingInstances     #-}
 
 import Generics.Instant
+import Generics.Instant.TH
 import Generics.Instant.Functions
 import Prelude hiding (Eq, Show(..))
 import qualified Prelude as P (Show(..))
@@ -64,7 +67,7 @@ testExp4 = update exp2
 data Decl = None | Seq Decl Decl | Assign String Expr
 
 data Expr = V String | Lam String Expr | App Expr Expr | Let Decl Expr
-
+{-
 data None
 data Seq
 data Assign
@@ -109,6 +112,12 @@ instance Representable Expr where
   to (R (L (C (Var v :*: Rec e))))     = Lam v e
   to (R (R (L (C (Rec f :*: Rec e))))) = App f e
   to (R (R (R (C (Rec d :*: Rec e))))) = Let d e
+-}
+
+-- Using TH instead
+$(deriveAll ''Decl)
+$(deriveAll ''Expr)
+
 
 decls = Seq (Assign "x" (Lam "z" (V "z"))) (Assign "y" (V "x"))
 expr  = Let decls (App (V "x") (V "y"))

@@ -1,5 +1,7 @@
-{-# LANGUAGE EmptyDataDecls        #-}
-{-# OPTIONS -fno-warn-orphans      #-}
+{-# LANGUAGE EmptyDataDecls           #-}
+{-# LANGUAGE TypeOperators            #-}
+{-# LANGUAGE TypeFamilies             #-}
+{-# OPTIONS -fno-warn-orphans         #-}
 
 -----------------------------------------------------------------------------
 -- |

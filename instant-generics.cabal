@@ -1,11 +1,11 @@
 category:               Generics
 copyright:              (c) 2010 Universiteit Utrecht
 name:                   instant-generics
-version:                0.1
+version:                0.2
 license:                BSD3
 license-file:           LICENSE
 author:                 Manuel Chakravarty, Gabriel Ditu, Roman Leshchinskiy,
-                        Jose Pedro Magalhaes
+                        José Pedro Magalhães
 maintainer:             generics@haskell.org
 synopsis:               Generic programming library with a sum of products view
 description:               
@@ -17,7 +17,7 @@ description:
   in the paper:
   .
   *  Thomas van Noort, Alexey Rodriguez Yakushev, Stefan Holdermans, 
-     Johan Jeuring, Bastiaan Heeren, Jose Pedro Magalhaes.
+     Johan Jeuring, Bastiaan Heeren, José Pedro Magalhães.
      /A Lightweight Approach to Datatype-Generic Rewriting./
      Journal of Functional Programming, Special Issue on Generic Programming, 
      2010.
@@ -32,15 +32,13 @@ extra-source-files:     examples/GMapAssoc.hs
 
 library
   hs-source-dirs:         src
-  build-depends:          base >= 3.0 && < 5
+  build-depends:          base >= 3.0 && < 5, template-haskell >=2.4 && <2.5
   exposed-modules:        Generics.Instant,
                           Generics.Instant.Base,
+                          Generics.Instant.TH,
                           Generics.Instant.Instances,
                           Generics.Instant.Functions,
                           Generics.Instant.Functions.Show,
                           Generics.Instant.Functions.Empty,
                           Generics.Instant.Functions.Eq
-  extensions:             FlexibleContexts, FlexibleInstances,
-                          TypeSynonymInstances, TypeFamilies, TypeOperators,
-                          OverlappingInstances
   ghc-options:            -Wall

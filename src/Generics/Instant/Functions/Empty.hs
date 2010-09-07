@@ -1,4 +1,7 @@
-{-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE ScopedTypeVariables      #-}
+{-# LANGUAGE TypeOperators            #-}
+{-# LANGUAGE FlexibleContexts         #-}
+{-# LANGUAGE OverlappingInstances     #-}
 
 -----------------------------------------------------------------------------
 -- |
