@@ -22,6 +22,7 @@ module Generics.Instant.TH (
     , deriveConstructors
     , deriveRepresentable
     , deriveRep
+    , simplInstance
   ) where
 
 import Generics.Instant.Base
@@ -32,6 +33,16 @@ import Language.Haskell.TH.Syntax (Lift(..))
 import Data.List (intercalate)
 import Control.Monad
 
+
+-- | Given the names of a generic class, a type to instantiate, a function in
+-- the class and the default implementation, generates the code for a basic
+-- generic instance.
+simplInstance :: Name -> Name -> Name -> Name -> Q [Dec]
+simplInstance cl ty fn df = do
+  i <- reify (genRepName ty)
+  x <- newName "x"
+  fmap (: []) $ instanceD (cxt []) (conT cl `appT` conT ty)
+    [funD fn [clause [] (normalB (varE df)) []]]
 
 -- | Given the type and the name (as string) for the type to derive,
 -- generate the 'Constructor' instances and the 'Representable' instance.
