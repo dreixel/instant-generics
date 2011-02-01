@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts         #-}
 {-# LANGUAGE TypeOperators            #-}
 {-# LANGUAGE OverlappingInstances     #-}
+{-# LANGUAGE GADTs                    #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -38,7 +39,7 @@ instance (Eq a, Eq b) => Eq (a :+: b) where
 instance (Eq a, Eq b) => Eq (a :*: b) where
   eq' (a :*: b) (a' :*: b') = eq' a a' && eq' b b'
   
-instance (Eq a) => Eq (C c a) where
+instance (Eq a) => Eq (CEq c p q a) where
   eq' (C a) (C a') = eq' a a'
 
 instance Eq a => Eq (Var a) where

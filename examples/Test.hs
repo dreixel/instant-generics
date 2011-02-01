@@ -5,6 +5,7 @@
 {-# LANGUAGE EmptyDataDecls           #-}
 {-# LANGUAGE TemplateHaskell          #-}
 {-# LANGUAGE OverlappingInstances     #-}
+{-# LANGUAGE GADTs                    #-}
 
 import Generics.Instant
 import Generics.Instant.TH
