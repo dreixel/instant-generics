@@ -18,11 +18,17 @@
 
 -- Adapted from Generics.Deriving.TH
 module Generics.Instant.TH (
+    -- * Main generator
       deriveAll
+
+    -- * Individual generators
     , deriveConstructors
     , deriveRepresentable
     , deriveRep
+
+    -- * Utilities
     , simplInstance
+    , genRepName, typeVariables, tyVarBndrToName
   ) where
 
 import Generics.Instant.Base
@@ -32,6 +38,7 @@ import Language.Haskell.TH.Syntax (Lift(..))
 
 import Data.List (intercalate)
 import Control.Monad
+import Debug.Trace
 
 
 -- | Given the names of a generic class, a type to instantiate, a function in
@@ -39,10 +46,14 @@ import Control.Monad
 -- generic instance.
 simplInstance :: Name -> Name -> Name -> Name -> Q [Dec]
 simplInstance cl ty fn df = do
-  i <- reify (genRepName ty)
-  x <- newName "x"
-  fmap (: []) $ instanceD (cxt []) (conT cl `appT` conT ty)
+  i  <- reify (genRepName ty)
+  i' <- reify ty
+  let typ = return (foldl (\a -> AppT a . VarT . tyVarBndrToName) 
+                              (ConT ty) (typeVariables i'))
+  fmap (: []) $ instanceD (cxt []) (conT cl `appT` typ)
     [funD fn [clause [] (normalB (varE df)) []]]
+
+
 
 -- | Given the type and the name (as string) for the type to derive,
 -- generate the 'Constructor' instances and the 'Representable' instance.
@@ -125,6 +136,8 @@ mkConstrData dt r@(RecC _ _) =
   mkConstrData dt (stripRecordNames r)
 mkConstrData dt (InfixC t1 n t2) =
   mkConstrData dt (NormalC n [t1,t2])
+-- Contexts are ignored
+mkConstrData dt (ForallC _ _ c) = mkConstrData dt c
 
 instance Lift Fixity where
   lift Prefix      = conE 'Prefix
@@ -136,6 +149,8 @@ instance Lift Associativity where
   lift NotAssociative   = conE 'NotAssociative
 
 mkConstrInstance :: Name -> Con -> Q Dec
+-- Contexts are ignored
+mkConstrInstance dt (ForallC _ _ c) = mkConstrInstance dt c
 mkConstrInstance dt (NormalC n _) = mkConstrInstanceWith dt n []
 mkConstrInstance dt (RecC    n _) = mkConstrInstanceWith dt n
       [ funD 'conIsRecord [clause [wildP] (normalB (conE 'True)) []]]
@@ -166,7 +181,7 @@ repType n =
       i <- reify n
       let b = case i of
                 TyConI (DataD _ dt vs cs _) ->
-                  (foldr1' sum (error "Empty datatypes are not supported.")
+                  (foldBal' sum (error "Empty datatypes are not supported.")
                     (map (repCon (dt, map tyVarBndrToName vs)) cs))
                 TyConI (NewtypeD _ dt vs c _) ->
                   repCon (dt, map tyVarBndrToName vs) c
@@ -179,21 +194,22 @@ repType n =
 
 
 repCon :: (Name, [Name]) -> Con -> Q Type
+-- Contexts are ignored
+repCon d (ForallC _ _ c) = repCon d c
 repCon (dt, vs) (NormalC n []) =
     conT ''C `appT` (conT $ genName [dt, n]) `appT` conT ''U
 repCon (dt, vs) (NormalC n fs) =
     conT ''C `appT` (conT $ genName [dt, n]) `appT` 
-     (foldr1 prod (map (repField (dt, vs) . snd) fs)) where
+     (foldBal prod (map (repField (dt, vs) . snd) fs)) where
     prod :: Q Type -> Q Type -> Q Type
     prod a b = conT ''(:*:) `appT` a `appT` b
 repCon (dt, vs) r@(RecC n []) =
     conT ''C `appT` (conT $ genName [dt, n]) `appT` conT ''U
 repCon (dt, vs) r@(RecC n fs) =
     conT ''C `appT` (conT $ genName [dt, n]) `appT` 
-      (foldr1 prod (map (repField' (dt, vs) n) fs)) where
+      (foldBal prod (map (repField' (dt, vs) n) fs)) where
     prod :: Q Type -> Q Type -> Q Type
     prod a b = conT ''(:*:) `appT` a `appT` b
-
 repCon d (InfixC t1 n t2) = repCon d (NormalC n [t1,t2])
 
 --dataDeclToType :: (Name, [Name]) -> Type
@@ -213,12 +229,12 @@ mkFrom :: Name -> Int -> Int -> Name -> Q [Q Clause]
 mkFrom ns m i n =
     do
       -- runIO $ putStrLn $ "processing " ++ show n
-      let wrapE e = lrE m i e
+      let wrapE e = e -- lrE m i e
       i <- reify n
       let b = case i of
                 TyConI (DataD _ dt vs cs _) ->
                   zipWith (fromCon wrapE ns (dt, map tyVarBndrToName vs)
-                    (length cs)) [0..] cs
+                    (length cs)) [1..] cs
                 TyConI (NewtypeD _ dt vs c _) ->
                   [fromCon wrapE ns (dt, map tyVarBndrToName vs) 1 0 c]
                 TyConI (TySynD t _ _) -> error "type synonym?" 
@@ -230,12 +246,12 @@ mkTo :: Name -> Int -> Int -> Name -> Q [Q Clause]
 mkTo ns m i n =
     do
       -- runIO $ putStrLn $ "processing " ++ show n
-      let wrapP p = lrP m i p
+      let wrapP p = p -- lrP m i p
       i <- reify n
       let b = case i of
                 TyConI (DataD _ dt vs cs _) ->
                   zipWith (toCon wrapP ns (dt, map tyVarBndrToName vs)
-                    (length cs)) [0..] cs
+                    (length cs)) [1..] cs
                 TyConI (NewtypeD _ dt vs c _) ->
                   [toCon wrapP ns (dt, map tyVarBndrToName vs) 1 0 c]
                 TyConI (TySynD t _ _) -> error "type synonym?" 
@@ -244,6 +260,8 @@ mkTo ns m i n =
       return b
 
 fromCon :: (Q Exp -> Q Exp) -> Name -> (Name, [Name]) -> Int -> Int -> Con -> Q Clause
+-- Contexts are ignored
+fromCon wrap ns d m i (ForallC _ _ c) = fromCon wrap ns d m i c
 fromCon wrap ns (dt, vs) m i (NormalC cn []) =
   clause
     [conP cn []]
@@ -253,7 +271,7 @@ fromCon wrap ns (dt, vs) m i (NormalC cn fs) =
   clause
     [conP cn (map (varP . field) [0..length fs - 1])]
     (normalB $ wrap $ lrE m i $ conE 'C `appE` 
-      foldr1 prod (zipWith (fromField (dt, vs)) [0..] (map snd fs))) []
+      foldBal prod (zipWith (fromField (dt, vs)) [0..] (map snd fs))) []
   where prod x y = conE '(:*:) `appE` x `appE` y
 fromCon wrap ns (dt, vs) m i r@(RecC cn []) =
   clause
@@ -263,7 +281,7 @@ fromCon wrap ns (dt, vs) m i r@(RecC cn fs) =
   clause
     [conP cn (map (varP . field) [0..length fs - 1])]
     (normalB $ wrap $ lrE m i $ conE 'C `appE` 
-      foldr1 prod (zipWith (fromField (dt, vs)) [0..] (map trd fs))) []
+      foldBal prod (zipWith (fromField (dt, vs)) [0..] (map trd fs))) []
   where prod x y = conE '(:*:) `appE` x `appE` y
 fromCon wrap ns (dt, vs) m i (InfixC t1 cn t2) =
   fromCon wrap ns (dt, vs) m i (NormalC cn [t1,t2])
@@ -273,6 +291,8 @@ fromField :: (Name, [Name]) -> Int -> Type -> Q Exp
 fromField (dt, vs) nr t = conE 'Rec `appE` varE (field nr)
 
 toCon :: (Q Pat -> Q Pat) -> Name -> (Name, [Name]) -> Int -> Int -> Con -> Q Clause
+-- Contexts are ignored
+toCon wrap ns d m i (ForallC _ _ c) = toCon wrap ns d m i c
 toCon wrap ns (dt, vs) m i (NormalC cn []) =
     clause
       [wrap $ lrP m i $ conP 'C [conP 'U []]]
@@ -281,7 +301,7 @@ toCon wrap ns (dt, vs) m i (NormalC cn fs) =
     -- runIO (putStrLn ("constructor " ++ show ix)) >>
     clause
       [wrap $ lrP m i $ conP 'C
-        [foldr1 prod (zipWith (toField (dt, vs)) [0..] (map snd fs))]]
+        [foldBal prod (zipWith (toField (dt, vs)) [0..] (map snd fs))]]
       (normalB $ foldl appE (conE cn) (map (varE . field) [0..length fs - 1])) []
   where prod x y = conP '(:*:) [x,y]
 toCon wrap ns (dt, vs) m i r@(RecC cn []) =
@@ -291,7 +311,7 @@ toCon wrap ns (dt, vs) m i r@(RecC cn []) =
 toCon wrap ns (dt, vs) m i r@(RecC cn fs) =
     clause
       [wrap $ lrP m i $ conP 'C
-        [foldr1 prod (zipWith (toField (dt, vs)) [0..] (map trd fs))]]
+        [foldBal prod (zipWith (toField (dt, vs)) [0..] (map trd fs))]]
       (normalB $ foldl appE (conE cn) (map (varE . field) [0..length fs - 1])) []
   where prod x y = conP '(:*:) [x,y]
 toCon wrap ns (dt, vs) m i (InfixC t1 cn t2) =
@@ -306,14 +326,26 @@ field :: Int -> Name
 field n = mkName $ "f" ++ show n
 
 lrP :: Int -> Int -> (Q Pat -> Q Pat)
+{-
 lrP 1 0 p = p
 lrP m 0 p = conP 'L [p]
 lrP m i p = conP 'R [lrP (m-1) (i-1) p]
+-}
+lrP m i p | m == 0       = error "1"
+          | m == 1       = p
+          | i <= div m 2 = conP 'L [lrP (div m 2)     i             p]
+          | i >  div m 2 = conP 'R [lrP (m - div m 2) (i - div m 2) p]
 
 lrE :: Int -> Int -> (Q Exp -> Q Exp)
+{-
 lrE 1 0 e = e
 lrE m 0 e = conE 'L `appE` e
 lrE m i e = conE 'R `appE` lrE (m-1) (i-1) e
+-}
+lrE m i e | m == 0       = error "2"
+          | m == 1       = e
+          | i <= div m 2 = conE 'L `appE` lrE (div m 2)     i         e
+          | i >  div m 2 = conE 'R `appE` lrE (m - div m 2) (i - div m 2) e
 
 trd (_,_,c) = c
 
@@ -321,3 +353,13 @@ trd (_,_,c) = c
 foldr1' f x [] = x
 foldr1' _ _ [x] = x
 foldr1' f x (h:t) = f h (foldr1' f x t)
+
+-- | Variant of foldr1 for producing balanced lists
+foldBal :: (a -> a -> a) -> [a] -> a
+foldBal op = foldBal' op (error "foldBal: empty list")
+
+foldBal' :: (a -> a -> a) -> a -> [a] -> a
+foldBal' _  x []  = x
+foldBal' _  _ [y] = y
+foldBal' op x l   = let (a,b) = splitAt (length l `div` 2) l
+                    in foldBal' op x a `op` foldBal' op x b

@@ -1,7 +1,7 @@
 category:               Generics
 copyright:              (c) 2010 Universiteit Utrecht
 name:                   instant-generics
-version:                0.2.1
+version:                0.3
 license:                BSD3
 license-file:           LICENSE
 author:                 Manuel Chakravarty, Gabriel Ditu, Roman Leshchinskiy,
