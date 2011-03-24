@@ -95,7 +95,7 @@ deriveInst t = do
     instanceD (cxt [])
       (conT ''Representable `appT` typ t)
         [ tySynInstD ''Rep [typ t] (typ (genRepName t))
-        , inlPrg, funD 'from fcs, funD 'to tcs]
+        , {- inlPrg, -} funD 'from fcs, funD 'to tcs]
 
 constrInstance :: Name -> Q [Dec]
 constrInstance n = do
