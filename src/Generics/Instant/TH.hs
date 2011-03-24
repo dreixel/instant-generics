@@ -88,13 +88,14 @@ deriveInst t = do
   i <- reify t
   let typ q = return $ foldl (\a -> AppT a . VarT . tyVarBndrToName) (ConT q) 
                 (typeVariables i)
+      inlPrg = pragInlD t (inlineSpecPhase True False True 1)
   fcs <- mkFrom t 1 0 t
   tcs <- mkTo   t 1 0 t
   liftM (:[]) $
     instanceD (cxt [])
       (conT ''Representable `appT` typ t)
         [ tySynInstD ''Rep [typ t] (typ (genRepName t))
-        , funD 'from fcs, funD 'to tcs]
+        , inlPrg, funD 'from fcs, funD 'to tcs]
 
 constrInstance :: Name -> Q [Dec]
 constrInstance n = do
@@ -182,9 +183,9 @@ repType n =
       let b = case i of
                 TyConI (DataD _ dt vs cs _) ->
                   (foldBal' sum (error "Empty datatypes are not supported.")
-                    (map (repCon (dt, map tyVarBndrToName vs)) cs))
+                    (map (repConGADT (dt, map tyVarBndrToName vs)) cs))
                 TyConI (NewtypeD _ dt vs c _) ->
-                  repCon (dt, map tyVarBndrToName vs) c
+                  repConGADT (dt, map tyVarBndrToName vs) c
                 TyConI (TySynD t _ _) -> error "type synonym?" 
                 _ -> error "unknown construct" 
       --appT b (conT $ mkName (nameBase n))
@@ -193,24 +194,43 @@ repType n =
     sum a b = conT ''(:+:) `appT` a `appT` b
 
 
-repCon :: (Name, [Name]) -> Con -> Q Type
--- Contexts are ignored
-repCon d (ForallC _ _ c) = repCon d c
-repCon (dt, vs) (NormalC n []) =
-    conT ''C `appT` (conT $ genName [dt, n]) `appT` conT ''U
-repCon (dt, vs) (NormalC n fs) =
-    conT ''C `appT` (conT $ genName [dt, n]) `appT` 
+repConGADT :: (Name, [Name]) -> Con -> Q Type
+repConGADT d (ForallC _vs ctx c) = repCon d c (f ctx) where
+  f ((EqualP t1 t2):r) = case f r of
+                       (t1s,t2s) -> ( ConT (mkName ":*:") `AppT` t1 `AppT` t1s
+                                    , ConT (mkName ":*:") `AppT` t2 `AppT` t2s)
+  f (_:r) = f r
+  f []    = baseEqs
+repConGADT d c = repCon d c baseEqs
+
+flattenEqs :: (Type, Type) -> Q Type
+flattenEqs (t1, t2) = return t1 `appT` return t2
+
+-- () ~ ()
+baseEqs :: (Type, Type)
+baseEqs = (TupleT 0, TupleT 0)
+
+repCon :: (Name, [Name]) -> Con -> (Type,Type) -> Q Type
+repCon _ (ForallC _ _ _) _ = error "impossible"
+repCon (dt, vs) (NormalC n []) (t1,t2) =
+    conT ''CEq `appT` (conT $ genName [dt, n]) `appT` return t1 
+                                               `appT` return t2 `appT` conT ''U
+repCon (dt, vs) (NormalC n fs) (t1,t2) =
+    conT ''CEq `appT` (conT $ genName [dt, n]) `appT` return t1 
+                                               `appT` return t2 `appT` 
      (foldBal prod (map (repField (dt, vs) . snd) fs)) where
     prod :: Q Type -> Q Type -> Q Type
     prod a b = conT ''(:*:) `appT` a `appT` b
-repCon (dt, vs) r@(RecC n []) =
-    conT ''C `appT` (conT $ genName [dt, n]) `appT` conT ''U
-repCon (dt, vs) r@(RecC n fs) =
-    conT ''C `appT` (conT $ genName [dt, n]) `appT` 
+repCon (dt, vs) r@(RecC n []) (t1,t2)  =
+    conT ''C `appT` (conT $ genName [dt, n]) `appT` return t1
+                                             `appT` return t2 `appT` conT ''U
+repCon (dt, vs) r@(RecC n fs) (t1,t2) =
+    conT ''C `appT` (conT $ genName [dt, n]) `appT` return t1 
+                                             `appT` return t2 `appT` 
       (foldBal prod (map (repField' (dt, vs) n) fs)) where
     prod :: Q Type -> Q Type -> Q Type
     prod a b = conT ''(:*:) `appT` a `appT` b
-repCon d (InfixC t1 n t2) = repCon d (NormalC n [t1,t2])
+repCon d (InfixC t1 n t2) eqs = repCon d (NormalC n [t1,t2]) eqs
 
 --dataDeclToType :: (Name, [Name]) -> Type
 --dataDeclToType (dt, vs) = foldl (\a b -> AppT a (VarT b)) (ConT dt) vs
