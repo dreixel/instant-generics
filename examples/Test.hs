@@ -5,6 +5,7 @@
 {-# LANGUAGE EmptyDataDecls           #-}
 {-# LANGUAGE TemplateHaskell          #-}
 {-# LANGUAGE OverlappingInstances     #-}
+{-# LANGUAGE GADTs                    #-}
 
 import Generics.Instant
 import Generics.Instant.TH
@@ -155,3 +156,24 @@ testAST5 = update decls
 testAST6 :: Expr
 testAST6 = update expr
 -}
+
+-------------------------------------------------------------------------------
+-- Equality constraints
+-------------------------------------------------------------------------------
+
+data G1 :: * -> * where
+  G11 :: Int    -> G1 Int
+  G12 :: G1 Int -> G1 a
+
+$(deriveAll ''G1)
+
+instance Show (G1 a) where show' = show
+instance Empty (G1 Int) where empty' = empty
+instance Eq (G1 a) where eq' = eq
+
+g1 :: G1 a
+g1 = G12 (G11 3)
+
+testG11 = show g1
+testG12 = empty :: G1 Int -- loops because of Rec Int...
+testG13 = eq g1 testG12

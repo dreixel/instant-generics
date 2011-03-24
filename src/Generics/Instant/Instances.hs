@@ -1,6 +1,7 @@
 {-# LANGUAGE EmptyDataDecls           #-}
 {-# LANGUAGE TypeOperators            #-}
 {-# LANGUAGE TypeFamilies             #-}
+{-# LANGUAGE GADTs                    #-}
 {-# OPTIONS -fno-warn-orphans         #-}
 
 -----------------------------------------------------------------------------
@@ -57,8 +58,8 @@ instance (Representable a, Representable b) => Representable (a :+: b) where
   to = id
   from = id
   
-instance Representable a => Representable (C c a) where 
-  type Rep (C c a) = C c a
+instance Representable a => Representable (CEq c p q a) where 
+  type Rep (CEq c p q a) = CEq c p q a
   to = id
   from = id
   
