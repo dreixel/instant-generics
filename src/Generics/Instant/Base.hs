@@ -1,8 +1,5 @@
 {-# LANGUAGE TypeOperators            #-}
 {-# LANGUAGE TypeFamilies             #-}
-{-# LANGUAGE StandaloneDeriving       #-}
-{-# LANGUAGE GADTs                    #-}
-{-# LANGUAGE FlexibleInstances        #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -41,7 +38,7 @@
 -----------------------------------------------------------------------------
 
 module Generics.Instant.Base (
-      U(..), (:+:)(..), (:*:)(..), CEq(..), C, Var(..), Rec(..)
+      U(..), (:+:)(..), (:*:)(..), C(..), Var(..), Rec(..)
     , Constructor(..), Fixity(..), Associativity(..)
     , Representable(..)
   ) where
@@ -52,26 +49,20 @@ infixr 6 :*:
 data U       = U              deriving (Show, Read)
 data a :+: b = L a | R b      deriving (Show, Read)
 data a :*: b = a :*: b        deriving (Show, Read)
+data C c a   = C a            deriving (Show, Read)
 data Var a   = Var a          deriving (Show, Read)
 data Rec a   = Rec a          deriving (Show, Read)
-
-data CEq c p q a where C :: a -> CEq c p p a
-deriving instance (Show a) => Show (CEq c p q a)
-deriving instance (Read a) => Read (CEq c p p a)
-
--- Shorthand when no proofs are required
-type C c a = CEq c () () a
 
 -- | Class for datatypes that represent data constructors.
 -- For non-symbolic constructors, only 'conName' has to be defined.
 class Constructor c where
   {-# INLINE conName #-}
-  conName   :: t c p q a -> String
+  conName   :: t c a -> String
   {-# INLINE conFixity #-}
-  conFixity :: t c p q a -> Fixity
+  conFixity :: t c a -> Fixity
   conFixity = const Prefix
   {-# INLINE conIsRecord #-}
-  conIsRecord :: t c p q a -> Bool
+  conIsRecord :: t c a -> Bool
   conIsRecord = const False
 
 -- | Datatype to represent the fixity of a constructor. An infix declaration

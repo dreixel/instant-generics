@@ -2,7 +2,6 @@
 {-# LANGUAGE FlexibleInstances        #-}
 {-# LANGUAGE FlexibleContexts         #-}
 {-# LANGUAGE OverlappingInstances     #-}
-{-# LANGUAGE GADTs                    #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -41,7 +40,7 @@ instance (Show a, Show b) => Show (a :+: b) where
 instance (Show a, Show b) => Show (a :*: b) where
   show' (a :*: b) = show' a `space` show' b
   
-instance (Show a, Constructor c) => Show (CEq c p q a) where
+instance (Show a, Constructor c) => Show (C c a) where
   show' c@(C a) | show' a == "" = paren $ conName c
                 | otherwise     = paren $ (conName c) `space` show' a
 
