@@ -1,7 +1,7 @@
 category:               Generics
-copyright:              (c) 2010 Universiteit Utrecht
+copyright:              (c) 2011 Universiteit Utrecht
 name:                   instant-generics
-version:                0.3
+version:                0.4
 license:                BSD3
 license-file:           LICENSE
 author:                 Manuel Chakravarty, Gabriel Ditu, Roman Leshchinskiy,
@@ -26,7 +26,7 @@ stability:              experimental
 build-type:             Simple
 homepage:               http://www.cs.uu.nl/wiki/GenericProgramming/InstantGenerics
 cabal-version:          >= 1.2.3
-tested-with:            GHC == 6.8.3, GHC == 6.10.4, GHC == 6.12.1, GHC == 7.0.1
+tested-with:            GHC == 6.8.3, GHC == 6.10.4, GHC == 6.12.1, GHC == 7.0.2
 extra-source-files:     examples/GMapAssoc.hs
                         examples/Test.hs
 

@@ -6,6 +6,7 @@
 {-# LANGUAGE TemplateHaskell          #-}
 {-# LANGUAGE OverlappingInstances     #-}
 {-# LANGUAGE GADTs                    #-}
+{-# LANGUAGE ExistentialQuantification #-}
 
 import Generics.Instant
 import Generics.Instant.TH
@@ -16,7 +17,7 @@ import qualified Prelude as P (Show(..))
 -------------------------------------------------------------------------------
 -- Simple Datatype
 -------------------------------------------------------------------------------
-
+{-
 -- Example datatype
 data Exp = Const Int | Plus Exp Exp
 
@@ -156,6 +157,7 @@ testAST5 = update decls
 testAST6 :: Expr
 testAST6 = update expr
 -}
+-}
 
 -------------------------------------------------------------------------------
 -- Equality constraints
@@ -164,7 +166,11 @@ testAST6 = update expr
 data G1 :: * -> * where
   G11 :: Int    -> G1 Int
   G12 :: G1 Int -> G1 a
-
+{-
+-- Equivalent to
+data G1 a = (a ~ Int) => G11 Int
+          | ()        => G12 (G1 Int)
+-}
 $(deriveAll ''G1)
 
 instance Show (G1 a) where show' = show
@@ -177,3 +183,30 @@ g1 = G12 (G11 3)
 testG11 = show g1
 testG12 = empty :: G1 Int -- loops because of Rec Int...
 testG13 = eq g1 testG12
+
+
+
+-- Type-level naturals
+data Ze
+data Su n
+
+-- Vec has a parameter 'a' and an index 'n'
+data Vec a :: * -> * where
+  Nil :: Vec a Ze
+  Cons :: a -> Vec a n -> Vec a (Su n)
+{-
+data Vec a n =  (n ~ Ze)             => Nil
+              | (forall m. n ~ Su m) => Cons a (Vec a n)
+-}
+$(deriveAll ''Vec)
+{-
+data Term :: * -> * where
+  Lit    :: Int -> Term Int
+  IsZero :: Term Int -> Term Bool
+  If     :: Term Bool -> Term a -> Term a -> Term a
+  Pair   :: Term a -> Term b -> Term (a,b)
+-}
+data Term a = (a ~ Int)               => Lit Int
+            | (a ~ Bool)              => IsZero (Term Int)
+            | ()                      => If (Term Bool) (Term a) (Term a)
+            | forall b c. (a ~ (b,c)) => Pair (Term b) (Term c)

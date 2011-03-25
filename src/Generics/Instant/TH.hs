@@ -32,12 +32,15 @@ module Generics.Instant.TH (
   ) where
 
 import Generics.Instant.Base
+import Generics.SYB (everywhere, mkT, gshow)
 
 import Language.Haskell.TH hiding (Fixity())
 import Language.Haskell.TH.Syntax (Lift(..))
 
 import Data.List (intercalate)
+import qualified Data.Map as M
 import Control.Monad
+import Control.Arrow ((&&&))
 import Debug.Trace
 
 
@@ -81,7 +84,13 @@ deriveRepresentable n = do
 deriveRep :: Name -> Q [Dec]
 deriveRep n = do
   i <- reify n
-  fmap (:[]) $ tySynD (genRepName n) (typeVariables i) (repType n)
+
+  let d = case i of
+            TyConI dec -> dec
+            _ -> error "unknown construct"
+  
+  exTyFams <- genExTyFams d
+  fmap (: exTyFams) $ tySynD (genRepName n) (typeVariables i) (repType d (typeVariables i))
 
 deriveInst :: Name -> Q [Dec]
 deriveInst t = do
@@ -114,6 +123,9 @@ typeVariables :: Info -> [TyVarBndr]
 typeVariables (TyConI (DataD    _ _ tv _ _)) = tv
 typeVariables (TyConI (NewtypeD _ _ tv _ _)) = tv
 typeVariables _                           = []
+
+tyVarBndrsToNames :: [TyVarBndr] -> [Name]
+tyVarBndrsToNames = map tyVarBndrToName
 
 tyVarBndrToName :: TyVarBndr -> Name
 tyVarBndrToName (PlainTV  name)   = name
@@ -175,33 +187,65 @@ mkConstrInstanceWith dt n extra =
   instanceD (cxt []) (appT (conT ''Constructor) (conT $ genName [dt, n]))
     (funD 'conName [clause [wildP] (normalB (stringE (nameBase n))) []] : extra)
 
-repType :: Name -> Q Type
-repType n =
-    do
-      -- runIO $ putStrLn $ "processing " ++ show n
-      i <- reify n
-      let b = case i of
-                TyConI (DataD _ dt vs cs _) ->
-                  (foldBal' sum (error "Empty datatypes are not supported.")
-                    (map (repConGADT (dt, map tyVarBndrToName vs)) cs))
-                TyConI (NewtypeD _ dt vs c _) ->
-                  repConGADT (dt, map tyVarBndrToName vs) c
-                TyConI (TySynD t _ _) -> error "type synonym?" 
-                _ -> error "unknown construct" 
-      --appT b (conT $ mkName (nameBase n))
-      b where
-    sum :: Q Type -> Q Type -> Q Type
-    sum a b = conT ''(:+:) `appT` a `appT` b
+repType :: Dec -> [TyVarBndr] -> Q Type
+repType i repVs =
+  do let sum :: Q Type -> Q Type -> Q Type
+         sum a b = conT ''(:+:) `appT` a `appT` b
+     case i of
+        (DataD _ dt vs cs _)   ->
+          (foldBal' sum (error "Empty datatypes are not supported.")
+            (map (repConGADT (dt, tyVarBndrsToNames vs) repVs) cs))
+        (NewtypeD _ dt vs c _) -> repConGADT (dt, tyVarBndrsToNames vs) repVs c
+        (TySynD t _ _)         -> error "type synonym?" 
+        _                      -> error "unknown construct"
 
+repConGADT :: (Name, [Name]) -> [TyVarBndr] -> Con -> Q Type
+-- Handle type equality constraints
+repConGADT d@(dt, dtVs) repVs (ForallC vs ctx c) = 
+  do
+     let
+        genTypeEqs ((EqualP t1 t2):r) | otherwise = case genTypeEqs r of 
+            (t1s,t2s) -> ( ConT ''(:*:) `AppT` (substTyVar exEnv t1) `AppT` t1s
+                         , ConT ''(:*:) `AppT` (substTyVar exEnv t2) `AppT` t2s)
+        genTypeEqs (_:r) = genTypeEqs r -- other constraints are ignored
+        genTypeEqs []    = baseEqs
 
-repConGADT :: (Name, [Name]) -> Con -> Q Type
-repConGADT d (ForallC _vs ctx c) = repCon d c (f ctx) where
-  f ((EqualP t1 t2):r) = case f r of
-                       (t1s,t2s) -> ( ConT (mkName ":*:") `AppT` t1 `AppT` t1s
-                                    , ConT (mkName ":*:") `AppT` t2 `AppT` t2s)
-  f (_:r) = f r
-  f []    = baseEqs
-repConGADT d c = repCon d c baseEqs
+        substTyVar :: M.Map Name Name -> Type -> Type
+        substTyVar env = everywhere (mkT f) where
+          f (VarT v) = case M.lookup v env of
+                         Nothing -> VarT v
+                         Just t -> (ConT t) `AppT` (VarT v)
+          f x        = x
+
+        exEnv :: M.Map Name Name
+        exEnv = M.fromList . map (id &&& exTyFamName) $ tyVarBndrsToNames vs
+
+     -- Go on with generating the representation type, taking the equalities
+     repCon d c (genTypeEqs ctx)
+-- No constraints, go on as usual
+repConGADT d _repVs c = repCon d c baseEqs
+
+-- Generates an existential type family name from a variable name
+exTyFamName :: Name -> Name
+exTyFamName = mkName . ("Ex_" ++) . nameBase
+
+-- Generate a type family representing an existentially-quantified variable
+genExTyFams :: Dec -> Q [Dec]
+genExTyFams (DataD    _ _ _ cs _) = fmap concat (mapM genExTyFams' cs)
+genExTyFams (NewtypeD _ _ _ c  _) = genExTyFams' c
+genExTyFams _                     = return []
+
+genExTyFams' :: Con -> Q [Dec]
+genExTyFams' (ForallC vs _ _) =
+  mapM (\x -> genExTyFams'' x (exTyFamName (tyVarBndrToName x))) vs
+genExTyFams' _ = return []
+
+genExTyFams'' :: TyVarBndr -> Name -> Q Dec
+genExTyFams''   (PlainTV  n)   nm = genExTyFams'' (KindedTV n StarK) nm
+genExTyFams'' b@(KindedTV n k) nm = 
+        do x <- familyKindD typeFam nm [b] (ArrowK k StarK)
+           runIO (putStrLn ("exTyFams: " ++ show x))
+           return x
 
 flattenEqs :: (Type, Type) -> Q Type
 flattenEqs (t1, t2) = return t1 `appT` return t2
