@@ -32,12 +32,12 @@ module Generics.Instant.TH (
   ) where
 
 import Generics.Instant.Base
-import Generics.SYB (everywhere, mkT, gshow)
+import Generics.SYB (everywhere, mkT, everything, mkQ, gshow)
 
 import Language.Haskell.TH hiding (Fixity())
-import Language.Haskell.TH.Syntax (Lift(..))
+import Language.Haskell.TH.Syntax (Lift(..), showName)
 
-import Data.List (intercalate)
+import Data.List (intercalate, nub)
 import qualified Data.Map as M
 import Control.Monad
 import Control.Arrow ((&&&))
@@ -89,8 +89,10 @@ deriveRep n = do
             TyConI dec -> dec
             _ -> error "unknown construct"
   
-  exTyFams <- genExTyFams d
-  fmap (: exTyFams) $ tySynD (genRepName n) (typeVariables i) (repType d (typeVariables i))
+  exTyFams      <- genExTyFams d
+  exTyFamsInsts <- genExTyFamInsts exTyFams d
+  fmap (: (exTyFams ++ exTyFamsInsts)) $ 
+    tySynD (genRepName n) (typeVariables i) (repType d (typeVariables i))
 
 deriveInst :: Name -> Q [Dec]
 deriveInst t = do
@@ -188,20 +190,41 @@ mkConstrInstanceWith dt n extra =
     (funD 'conName [clause [wildP] (normalB (stringE (nameBase n))) []] : extra)
 
 repType :: Dec -> [TyVarBndr] -> Q Type
-repType i repVs =
+repType i repVs = 
   do let sum :: Q Type -> Q Type -> Q Type
          sum a b = conT ''(:+:) `appT` a `appT` b
      case i of
-        (DataD _ dt vs cs _)   ->
+        (DataD _ dt vs cs _)   -> -- trace (gshow i) $
           (foldBal' sum (error "Empty datatypes are not supported.")
-            (map (repConGADT (dt, tyVarBndrsToNames vs) repVs) cs))
-        (NewtypeD _ dt vs c _) -> repConGADT (dt, tyVarBndrsToNames vs) repVs c
+            (map (repConGADT (dt, tyVarBndrsToNames vs) repVs 
+                   (extractIndices vs cs)) cs))
+        (NewtypeD _ dt vs c _) -> repConGADT (dt, tyVarBndrsToNames vs) repVs
+                                   (extractIndices vs [c]) c
         (TySynD t _ _)         -> error "type synonym?" 
         _                      -> error "unknown construct"
 
-repConGADT :: (Name, [Name]) -> [TyVarBndr] -> Con -> Q Type
+
+-- Given a datatype declaration, returns a list of its type variables which are
+-- used as index and not as data
+extractIndices :: [TyVarBndr] -> [Con] -> [Name]
+extractIndices vs = nub . everything (++) ([] `mkQ` isIndexEq) where
+  isIndexEq :: Pred -> [Name]
+  isIndexEq (EqualP (VarT a) (VarT b)) = if a `elem` tyVarBndrsToNames vs
+                                         then (a:)
+                                           (if b `elem` tyVarBndrsToNames vs
+                                           then [b] else []) else []
+  isIndexEq (EqualP (VarT a) _)        = if a `elem` tyVarBndrsToNames vs
+                                         then [a] else []
+  isIndexEq (EqualP _ (VarT a))        = if a `elem` tyVarBndrsToNames vs
+                                         then [a] else []
+  isIndexEq _                          = []
+
+repConGADT :: (Name, [Name]) -> [TyVarBndr] -> [Name] -> Con -> Q Type
+-- We only accept one index variable, for now
+repConGADT _ _ vs@(_:_:_) (ForallC _ _ _) = 
+  error ("Datatype indexed over >1 variable: " ++ show vs)
 -- Handle type equality constraints
-repConGADT d@(dt, dtVs) repVs (ForallC vs ctx c) = 
+repConGADT d@(dt, dtVs) repVs [indexVar] (ForallC vs ctx c) = 
   do
      let
         genTypeEqs ((EqualP t1 t2):r) | otherwise = case genTypeEqs r of 
@@ -214,20 +237,20 @@ repConGADT d@(dt, dtVs) repVs (ForallC vs ctx c) =
         substTyVar env = everywhere (mkT f) where
           f (VarT v) = case M.lookup v env of
                          Nothing -> VarT v
-                         Just t -> (ConT t) `AppT` (VarT v)
+                         Just t  -> ConT t `AppT` VarT indexVar
           f x        = x
 
         exEnv :: M.Map Name Name
         exEnv = M.fromList . map (id &&& exTyFamName) $ tyVarBndrsToNames vs
 
      -- Go on with generating the representation type, taking the equalities
-     repCon d c (genTypeEqs ctx)
+     repCon (dt, dtVs) (everywhere (mkT (substTyVar exEnv)) c) (genTypeEqs ctx)
 -- No constraints, go on as usual
-repConGADT d _repVs c = repCon d c baseEqs
+repConGADT d _repVs _ c = repCon d c baseEqs
 
 -- Generates an existential type family name from a variable name
 exTyFamName :: Name -> Name
-exTyFamName = mkName . ("Ex_" ++) . nameBase
+exTyFamName = mkName . ("Ex_" ++) . nameBase -- showName
 
 -- Generate a type family representing an existentially-quantified variable
 genExTyFams :: Dec -> Q [Dec]
@@ -243,9 +266,64 @@ genExTyFams' _ = return []
 genExTyFams'' :: TyVarBndr -> Name -> Q Dec
 genExTyFams''   (PlainTV  n)   nm = genExTyFams'' (KindedTV n StarK) nm
 genExTyFams'' b@(KindedTV n k) nm = 
-        do x <- familyKindD typeFam nm [b] (ArrowK k StarK)
+        do x <- familyKindD typeFam nm [b] StarK
            runIO (putStrLn ("exTyFams: " ++ show x))
            return x
+
+-- Generate the mobility rules and null cases for the existential type families
+genExTyFamInsts :: [Dec] -> Dec -> Q [Dec]
+genExTyFamInsts ds (DataD    _ _ _ cs _) = fmap concat $ 
+                                             mapM (genExTyFamInsts' ds) cs
+genExTyFamInsts ds (NewtypeD _ _ _ c  _) = genExTyFamInsts' ds c
+
+genExTyFamInsts' :: [Dec] -> Con -> Q [Dec]
+genExTyFamInsts' decs (ForallC vs cxt c) = 
+  do let nC = nullCase      (tyVarBndrsToNames vs) cxt
+         mR = mobilityRules (tyVarBndrsToNames vs) cxt
+
+         exTyFamNames = map getName decs
+
+         getName :: Dec -> Name
+         getName (FamilyD _ nm _ _) = nm
+         getName _                  = error "getName: impossible"
+
+         tySynInst nm ty x = TySynInstD nm [ty] x
+
+     return (  [ tySynInst (exTyFamName nm) ty (VarT nm) | (nm, ty) <- mR ]
+            ++ [ tySynInst nm ty (ConT ''Z) | ty <- nC, nm <- exTyFamNames ])
+genExTyFamInsts' _ _ = return []
+
+-- Compute the types which need null cases for every existential type family
+nullCase :: [a] -> Cxt -> [Type]
+nullCase [] = concatMap nullCase' where
+  nullCase' :: Pred -> [Type]
+  nullCase' (EqualP (VarT _) (VarT _)) = []
+  nullCase' (EqualP (VarT a) x) = if (everything (||) (False `mkQ` hasVar) x)
+                                    then [] else [x]
+  nullCase' (EqualP x (VarT a)) = nullCase' (EqualP (VarT a) x)
+  nullCase' _                   = []
+  hasVar :: Type -> Bool
+  hasVar (VarT _) = True
+  hasVar _        = False
+nullCase _ = const []
+
+-- Compute the shape of the mobility rules
+mobilityRules :: [Name] -> Cxt -> [(Name,Type)]
+mobilityRules [] _   = []
+mobilityRules vs cxt = concat [ mobilityRules' v p | v <- vs, p <- cxt ] where
+  mobilityRules' :: Name -> Pred -> [(Name,Type)]
+  mobilityRules' _ (EqualP (VarT _) (VarT _)) = []
+  mobilityRules' v (EqualP (VarT a) x) | v `inComplex` x = [(v,x)]
+                                       | otherwise       = []
+  mobilityRules' v (EqualP x (VarT a)) = mobilityRules' v (EqualP (VarT a) x)
+  mobilityRules' v _                   = []
+
+  inComplex :: Name -> Type -> Bool
+  inComplex v (VarT _) = False
+  inComplex v x = everything (||) (False `mkQ` q) x where
+    q (VarT x) | x == v    = True
+    q (VarT x) | otherwise = False
+    q _                    = False
 
 flattenEqs :: (Type, Type) -> Q Type
 flattenEqs (t1, t2) = return t1 `appT` return t2

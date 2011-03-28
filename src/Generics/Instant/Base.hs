@@ -41,7 +41,7 @@
 -----------------------------------------------------------------------------
 
 module Generics.Instant.Base (
-      U(..), (:+:)(..), (:*:)(..), CEq(..), C, Var(..), Rec(..)
+      Z, U(..), (:+:)(..), (:*:)(..), CEq(..), C, Var(..), Rec(..)
     , Constructor(..), Fixity(..), Associativity(..)
     , Representable(..)
   ) where
@@ -49,6 +49,7 @@ module Generics.Instant.Base (
 infixr 5 :+:
 infixr 6 :*:
 
+data Z
 data U       = U              deriving (Show, Read)
 data a :+: b = L a | R b      deriving (Show, Read)
 data a :*: b = a :*: b        deriving (Show, Read)

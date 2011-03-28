@@ -1,12 +1,13 @@
-{-# LANGUAGE TypeFamilies             #-}
-{-# LANGUAGE TypeOperators            #-}
-{-# LANGUAGE FlexibleInstances        #-}
-{-# LANGUAGE MultiParamTypeClasses    #-}
-{-# LANGUAGE EmptyDataDecls           #-}
-{-# LANGUAGE TemplateHaskell          #-}
-{-# LANGUAGE OverlappingInstances     #-}
-{-# LANGUAGE GADTs                    #-}
-{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE TypeOperators              #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE EmptyDataDecls             #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE OverlappingInstances       #-}
+{-# LANGUAGE GADTs                      #-}
+{-# LANGUAGE ExistentialQuantification  #-}
+{-# LANGUAGE StandaloneDeriving         #-}
 
 import Generics.Instant
 import Generics.Instant.TH
@@ -163,28 +164,41 @@ testAST6 = update expr
 -- Equality constraints
 -------------------------------------------------------------------------------
 
+-- Example 1
+
+-- G1 has one index
 data G1 :: * -> * where
   G11 :: Int    -> G1 Int
   G12 :: G1 Int -> G1 a
-{-
--- Equivalent to
-data G1 a = (a ~ Int) => G11 Int
-          | ()        => G12 (G1 Int)
--}
+
 $(deriveAll ''G1)
 
+{-
+data G11C
+data G12C
+
+instance Constructor G11C where conName _ = "G11"
+instance Constructor G12C where conName _ = "G12"
+
+instance Representable (G1 a) where
+  type Rep (G1 a) =   C G11C a Int (Rec Int)
+                  :+: C' G12C (Rec (G1 Int))
+  
+  from (G11 i) = L (C (Rec i))
+  from (G12 x) = R (C (Rec x))
+  to (L (C (Rec i))) = G11 i
+  to (R (C (Rec x))) = G12 x
+-}
+-- Generic function instances (should be automatically generated)
 instance Show (G1 a) where show' = show
-instance Empty (G1 Int) where empty' = empty
-instance Eq (G1 a) where eq' = eq
+-- instance GEnum (G1 Int) where genum' = genum
 
-g1 :: G1 a
-g1 = G12 (G11 3)
-
-testG11 = show g1
-testG12 = empty :: G1 Int -- loops because of Rec Int...
-testG13 = eq g1 testG12
+-- Testing
+gshowG1 = show (G12 (G11 3))
+-- genumG1 = take 100 $ genum :: [G1 Int]
 
 
+-- Example 2: vectors
 
 -- Type-level naturals
 data Ze
@@ -192,21 +206,121 @@ data Su n
 
 -- Vec has a parameter 'a' and an index 'n'
 data Vec a :: * -> * where
+  -- :: forall n. n ~ Ze => Vec a n
   Nil :: Vec a Ze
+  -- :: forall n m. n ~ Su m => a -> Vec a m -> Vec a n
   Cons :: a -> Vec a n -> Vec a (Su n)
-{-
-data Vec a n =  (n ~ Ze)             => Nil
-              | (forall m. n ~ Su m) => Cons a (Vec a n)
--}
+
 $(deriveAll ''Vec)
+
 {-
+-- Utilities for existentials
+type family X a
+
+data Imp -- not exported!
+
+-- mobility
+type instance X (Su n) = n
+-- null case
+type instance X Ze = Imp
+
+-- Representation
+data NilC
+data ConsC
+
+instance Constructor NilC  where conName _ = "Nil"
+instance Constructor ConsC where conName _ = "Cons"
+
+instance Representable (Vec a n) where
+  type Rep (Vec a n) =   
+        C NilC  n Ze         U
+    :+: C ConsC n (Su (X n)) (Var a :*: Rec (Vec a (X n)))
+  from Nil = L (C U)
+  from (Cons h t) = R (C (Var h :*: Rec t))
+
+  to (L (C U)) = Nil
+  to (R (C (Var h :*: Rec t))) = Cons h t
+-}
+-- Generic function instances (should be automatically generated)
+instance (Show a) => Show (Vec a n) where show' = show
+{-
+instance (GEnum a, GEnum (Vec a n)) => GEnum (Vec a (Su n)) where
+  genum' = genum
+
+instance (GEnum a) => GEnum (Vec a Ze) where
+  genum' = genum
+
+instance GEnum (Vec a Imp) where genum' = error "never happens"
+-}
+-- Testing
+gshowVec = show (Cons 'p' Nil)
+--genumVec = take 10 $ genum :: [Vec Int (Su Ze)]
+
+
+-- Example 3: terms
+
+-- Term has one index
 data Term :: * -> * where
   Lit    :: Int -> Term Int
   IsZero :: Term Int -> Term Bool
   If     :: Term Bool -> Term a -> Term a -> Term a
   Pair   :: Term a -> Term b -> Term (a,b)
+
+$(deriveAll ''Term)
+
+{-
+-- Utilities for existentials
+type family Y a
+type family Z a
+
+-- mobility
+type instance Y (a,b) = a
+type instance Z (a,b) = b
+
+-- null cases
+type instance Y Int  = Imp
+type instance Y Bool = Imp
+type instance Z Int  = Imp
+type instance Z Bool = Imp
+
+-- Representation
+data LitC
+data IsZeroC
+data IfC
+data PairC
+
+instance Constructor LitC    where conName _ = "Lit"
+instance Constructor IsZeroC where conName _ = "IsZero"
+instance Constructor IfC     where conName _ = "If"
+instance Constructor PairC   where conName _ = "Pair"
+
+instance Representable (Term a) where
+  type Rep (Term a) =
+          (C LitC a Int (Rec Int)
+      :+:  C IsZeroC a Bool (Rec (Term Int)))
+    :+:   (C PairC a (Y a, Z a) (Rec (Term (Y a)) :*: Rec (Term (Z a)))
+      :+:  C' IfC (Rec (Term Bool) :*: Rec (Term a) :*: Rec (Term a)))
+
+  from (Lit n) = L (L (C (Rec n)))
+  from (IsZero n) = L (R (C (Rec n)))
+  from (If b x y) = R (R (C (Rec b :*: Rec x :*: Rec y)))
+  from (Pair a b) = R (L (C (Rec a :*: Rec b)))
+
+  to (L (L (C (Rec n)))) = Lit n
+  to (L (R (C (Rec n)))) = IsZero n
+  to (R (R (C (Rec b :*: Rec x :*: Rec y)))) = If b x y
+  to (R (L (C (Rec a :*: Rec b)))) = Pair a b
 -}
-data Term a = (a ~ Int)               => Lit Int
-            | (a ~ Bool)              => IsZero (Term Int)
-            | ()                      => If (Term Bool) (Term a) (Term a)
-            | forall b c. (a ~ (b,c)) => Pair (Term b) (Term c)
+-- Generic function instances (should be automatically generated)
+instance Show (Term a) where show' = show
+{-
+instance GEnum (Term Int) where genum' = genum
+instance GEnum (Term Bool) where genum' = genum
+instance (GEnum (Term a), GEnum (Term b)) => GEnum (Term (a,b)) where
+  genum' = genum
+
+instance GEnum (Term Imp) where genum' = error "never happens"
+-}
+-- Testing
+gshowTerm = show (Pair (If (IsZero (Lit 1)) (Lit 2) (Lit 0)) (Lit 1))
+-- genumTerm = take 10 (genum :: [Term (Bool,Int)])
