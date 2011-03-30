@@ -1,10 +1,12 @@
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE EmptyDataDecls             #-}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE OverlappingInstances       #-}
+{-# LANGUAGE UndecidableInstances       #-}
 {-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE ExistentialQuantification  #-}
 {-# LANGUAGE StandaloneDeriving         #-}
@@ -15,10 +17,63 @@ import Generics.Instant.Functions
 import Prelude hiding (Eq, Show(..))
 import qualified Prelude as P (Show(..))
 
+--------------------------------------------------------------------------------
+-- Generic enum
+
+class GEnum a where
+  genum' :: [a]
+
+instance GEnum U where
+  genum' = [U]
+
+instance (GEnum a) => GEnum (Rec a) where
+  genum' = map Rec genum'
+
+instance (GEnum a) => GEnum (Var a) where
+  genum' = map Var genum'
+
+instance (GEnum a) => GEnum (CEq c p p a) where genum' = map C genum'
+instance (GEnum a) => GEnum (CEq c p q a) where genum' = []
+
+instance (GEnum f, GEnum g) => GEnum (f :+: g) where
+  genum' = map L genum' ||| map R genum'
+
+instance (GEnum f, GEnum g) => GEnum (f :*: g) where
+  genum' = diag (map (\x -> map (\y -> x :*: y) genum') genum')
+
+
+instance GEnum Int where
+  genum' = [0..9]
+
+
+-- Dispatcher
+genum :: (Representable a, GEnum (Rep a)) => [a]
+genum = map to genum'
+
+
+-- Utilities
+infixr 5 |||
+
+(|||) :: [a] -> [a] -> [a]
+[]     ||| ys = ys
+(x:xs) ||| ys = x : ys ||| xs
+
+diag :: [[a]] -> [a]
+diag = concat . foldr skew [] . map (map (\x -> [x]))
+
+skew :: [[a]] -> [[a]] -> [[a]]
+skew []     ys = ys
+skew (x:xs) ys = x : combine (++) xs ys
+
+combine :: (a -> a -> a) -> [a] -> [a] -> [a]
+combine _ xs     []     = xs
+combine _ []     ys     = ys
+combine f (x:xs) (y:ys) = f x y : combine f xs ys
+
 -------------------------------------------------------------------------------
 -- Simple Datatype
 -------------------------------------------------------------------------------
-{-
+
 -- Example datatype
 data Exp = Const Int | Plus Exp Exp
 
@@ -158,7 +213,6 @@ testAST5 = update decls
 testAST6 :: Expr
 testAST6 = update expr
 -}
--}
 
 -------------------------------------------------------------------------------
 -- Equality constraints
@@ -191,11 +245,12 @@ instance Representable (G1 a) where
 -}
 -- Generic function instances (should be automatically generated)
 instance Show (G1 a) where show' = show
+gadtInstance ''GEnum ''G1 'genum' 'genum
 -- instance GEnum (G1 Int) where genum' = genum
 
 -- Testing
 gshowG1 = show (G12 (G11 3))
--- genumG1 = take 100 $ genum :: [G1 Int]
+genumG1 = show (take 100 $ genum :: [G1 Int])
 
 
 -- Example 2: vectors
@@ -206,12 +261,13 @@ data Su n
 
 -- Vec has a parameter 'a' and an index 'n'
 data Vec a :: * -> * where
-  -- :: forall n. n ~ Ze => Vec a n
   Nil :: Vec a Ze
-  -- :: forall n m. n ~ Su m => a -> Vec a m -> Vec a n
   Cons :: a -> Vec a n -> Vec a (Su n)
-
-$(deriveAll ''Vec)
+{-
+data Vec a n =           (n ~ Ze)   => Nil
+             | forall m. (n ~ Su m) => Cons a (Vec a m)
+-}
+deriveAll ''Vec
 
 {-
 -- Utilities for existentials
@@ -242,19 +298,22 @@ instance Representable (Vec a n) where
   to (R (C (Var h :*: Rec t))) = Cons h t
 -}
 -- Generic function instances (should be automatically generated)
+
 instance (Show a) => Show (Vec a n) where show' = show
-{-
+
+--gadtInstance ''GEnum ''Vec 'genum' 'genum
+
 instance (GEnum a, GEnum (Vec a n)) => GEnum (Vec a (Su n)) where
   genum' = genum
 
 instance (GEnum a) => GEnum (Vec a Ze) where
   genum' = genum
 
-instance GEnum (Vec a Imp) where genum' = error "never happens"
--}
+instance GEnum (Vec a Z) where genum' = error "never happens"
+
 -- Testing
 gshowVec = show (Cons 'p' Nil)
---genumVec = take 10 $ genum :: [Vec Int (Su Ze)]
+genumVec = show . take 10 $ (genum :: [Vec Int (Su Ze)])
 
 
 -- Example 3: terms
@@ -263,25 +322,30 @@ gshowVec = show (Cons 'p' Nil)
 data Term :: * -> * where
   Lit    :: Int -> Term Int
   IsZero :: Term Int -> Term Bool
-  If     :: Term Bool -> Term a -> Term a -> Term a
   Pair   :: Term a -> Term b -> Term (a,b)
-
-$(deriveAll ''Term)
+  If     :: Term Bool -> Term a -> Term a -> Term a
+{-
+data Term a =            a ~ Int    => Lit Int
+            |            a ~ Bool   => IsZero (Term Int)
+            |            ()         => If (Term Bool) (Term a) (Term a)
+            | forall b c. a ~ (b,c) => Pair (Term b) (Term c)
+-}
+deriveAll ''Term
 
 {-
 -- Utilities for existentials
 type family Y a
-type family Z a
+type family YY a
 
 -- mobility
 type instance Y (a,b) = a
-type instance Z (a,b) = b
+type instance YY (a,b) = b
 
 -- null cases
-type instance Y Int  = Imp
-type instance Y Bool = Imp
-type instance Z Int  = Imp
-type instance Z Bool = Imp
+type instance Y Int  = Z
+type instance Y Bool = Z
+type instance YY Int  = Z
+type instance YY Bool = Z
 
 -- Representation
 data LitC
@@ -296,10 +360,10 @@ instance Constructor PairC   where conName _ = "Pair"
 
 instance Representable (Term a) where
   type Rep (Term a) =
-          (C LitC a Int (Rec Int)
-      :+:  C IsZeroC a Bool (Rec (Term Int)))
-    :+:   (C PairC a (Y a, Z a) (Rec (Term (Y a)) :*: Rec (Term (Z a)))
-      :+:  C' IfC (Rec (Term Bool) :*: Rec (Term a) :*: Rec (Term a)))
+          (CEq LitC a Int (Rec Int)
+      :+:  CEq IsZeroC a Bool (Rec (Term Int)))
+    :+:   (CEq PairC a (Y a, YY a) (Rec (Term (Y a)) :*: Rec (Term (YY a)))
+      :+:  CEq IfC () () (Rec (Term Bool) :*: Rec (Term a) :*: Rec (Term a)))
 
   from (Lit n) = L (L (C (Rec n)))
   from (IsZero n) = L (R (C (Rec n)))
@@ -311,16 +375,19 @@ instance Representable (Term a) where
   to (R (R (C (Rec b :*: Rec x :*: Rec y)))) = If b x y
   to (R (L (C (Rec a :*: Rec b)))) = Pair a b
 -}
--- Generic function instances (should be automatically generated)
-instance Show (Term a) where show' = show
+-- Generic function instances
+--instance Show (Term a) where show' = show
+simplInstance ''Show ''Term 'show' 'show
+gadtInstance ''GEnum ''Term 'genum' 'genum
+
 {-
 instance GEnum (Term Int) where genum' = genum
 instance GEnum (Term Bool) where genum' = genum
 instance (GEnum (Term a), GEnum (Term b)) => GEnum (Term (a,b)) where
   genum' = genum
 
-instance GEnum (Term Imp) where genum' = error "never happens"
+instance GEnum (Term Z) where genum' = error "never happens"
 -}
 -- Testing
 gshowTerm = show (Pair (If (IsZero (Lit 1)) (Lit 2) (Lit 0)) (Lit 1))
--- genumTerm = take 10 (genum :: [Term (Bool,Int)])
+genumTerm = show (take 10 (genum :: [Term (Bool,Int)]))

@@ -32,7 +32,8 @@ extra-source-files:     examples/GMapAssoc.hs
 
 library
   hs-source-dirs:         src
-  build-depends:          base >= 3.0 && < 5, template-haskell >=2.4 && <2.6
+  build-depends:          base >= 3.0 && < 5, template-haskell >=2.4 && <2.6,
+                          containers, syb
   exposed-modules:        Generics.Instant,
                           Generics.Instant.Base,
                           Generics.Instant.TH,

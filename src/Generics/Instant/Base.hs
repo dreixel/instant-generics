@@ -3,6 +3,7 @@
 {-# LANGUAGE StandaloneDeriving       #-}
 {-# LANGUAGE GADTs                    #-}
 {-# LANGUAGE FlexibleInstances        #-}
+{-# LANGUAGE EmptyDataDecls           #-}
 
 -----------------------------------------------------------------------------
 -- |

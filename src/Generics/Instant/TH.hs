@@ -27,7 +27,7 @@ module Generics.Instant.TH (
     , deriveRep
 
     -- * Utilities
-    , simplInstance
+    , simplInstance, gadtInstance
     , genRepName, typeVariables, tyVarBndrToName
   ) where
 
@@ -49,13 +49,94 @@ import Debug.Trace
 -- generic instance.
 simplInstance :: Name -> Name -> Name -> Name -> Q [Dec]
 simplInstance cl ty fn df = do
-  i  <- reify (genRepName ty)
-  i' <- reify ty
+  i <- reify ty
   let typ = return (foldl (\a -> AppT a . VarT . tyVarBndrToName) 
-                              (ConT ty) (typeVariables i'))
+                              (ConT ty) (typeVariables i))
   fmap (: []) $ instanceD (cxt []) (conT cl `appT` typ)
     [funD fn [clause [] (normalB (varE df)) []]]
 
+
+gadtInstance :: Name -> Name -> Name -> Name -> Q [Dec]
+gadtInstance cl ty fn df = do
+  i <- reify ty
+  let typ = (foldl (\a -> AppT a . VarT . tyVarBndrToName) 
+                              (ConT ty) (typeVariables i))
+
+      dt :: ([TyVarBndr],[Con])
+      dt = case i of
+             TyConI (DataD _ _ vs cs _) -> (vs, cs)
+             _ -> error ("gadtInstance: " ++ show ty ++ "is not a valid type")
+
+      -- List of index variable names
+      idxs :: [Name]
+      idxs = extractIndices (fst dt) (snd dt)
+
+      -- List of all the type equalities introduced by the constructors
+      eqs :: [Name] -> [Con] -> [([Type], [(Type,Type)])]
+      eqs nms cs = map f cs where
+        f :: Con -> ([Type], [(Type,Type)])
+        f (NormalC _ tys)    = (map snd tys, [])
+        f (RecC _ tys)       = (map (\(_,_,t) -> t) tys, [])
+        f (InfixC t1 _ t2)   = ([snd t1, snd t2],[])
+        f (ForallC vs cxt c) = case f c of 
+                                 (ts, eqs') -> (ts, (concatMap g cxt) ++ eqs')
+        g :: Pred -> [(Type,Type)]
+        g (EqualP (VarT t1) t2) | t1 `elem` nms = [(VarT t1,t2)]
+                                | otherwise     = []
+        g _                                     = []
+
+      subst :: [(Type,Type)] -> Type -> Type
+      subst s = everywhere (mkT f) where
+        f (VarT a) = case lookup (VarT a) s of
+                       Nothing -> VarT a
+                       Just t  -> t
+        f x        = x
+
+      mkInst :: ([Type], [(Type,Type)]) -> Dec
+      mkInst (args, tyEqs) = InstanceD (map mkCxt args) 
+                               (ConT cl `AppT` subst tyEqs typ) instBody
+
+      mkCxt :: Type -> Pred
+      mkCxt t = ClassP cl [t]
+
+      instBody :: [Dec]
+      instBody = [FunD fn [Clause [] (NormalB (VarE df)) []]]
+
+      ncTys :: [(Type,Type)]
+      ncTys = concatMap (nullCase []) (allCtxs (snd dt))
+      allCtxs :: [Con] -> [Cxt]
+      allCtxs = everything (++) ([] `mkQ` f) where
+        f :: Con -> [Cxt]
+        f (ForallC _ c _) = [c]
+        f _               = []
+
+      mkNcInst :: Type -> Dec
+      mkNcInst t = InstanceD [] (ConT cl `AppT` subst [(t,ConT ''Z)] typ) 
+                     [FunD fn [Clause [] (NormalB errorE) []]]
+
+      errorE :: Exp
+--      errorE = VarE 'undefined
+      errorE = VarE 'error `AppE` LitE (StringL $
+                    "should not happen. Debug info:\ndt -> " ++ show dt
+                 ++ "\nncTys -> " ++ show ncTys
+                 ++ "\nallEqs -> " ++ show (eqs idxs (snd dt)))
+
+      update :: (Eq a, Eq b) => ([a],b) -> [([a],b)] -> [([a],b)]
+      update (a,b) [] = []
+      update (a,b) ((a',b'):t) | b == b'   = (nub (a++a'),b) : t
+                               | otherwise = (a',b') : update (a,b) t
+
+      filterMerge :: [([Type], [(Type,Type)])] -> [([Type], [(Type,Type)])]
+      filterMerge ((a,b):t)  = case filterMerge t of
+                                 l -> if b `elem` (map snd l)
+                                       then update (a,b) l
+                                      else (a,b) : l
+      filterMerge []         = []
+
+      normInsts = map mkInst (filterMerge (eqs idxs (snd dt)))
+      ncInsts   = map mkNcInst (nub (map fst ncTys))
+
+  return $ normInsts ++ ncInsts
 
 
 -- | Given the type and the name (as string) for the type to derive,
@@ -194,7 +275,7 @@ repType i repVs =
   do let sum :: Q Type -> Q Type -> Q Type
          sum a b = conT ''(:+:) `appT` a `appT` b
      case i of
-        (DataD _ dt vs cs _)   -> -- trace (gshow i) $
+        (DataD _ dt vs cs _)   ->
           (foldBal' sum (error "Empty datatypes are not supported.")
             (map (repConGADT (dt, tyVarBndrsToNames vs) repVs 
                    (extractIndices vs cs)) cs))
@@ -250,7 +331,7 @@ repConGADT d _repVs _ c = repCon d c baseEqs
 
 -- Generates an existential type family name from a variable name
 exTyFamName :: Name -> Name
-exTyFamName = mkName . ("Ex_" ++) . nameBase -- showName
+exTyFamName = mkName . ("Ex_" ++) . showName
 
 -- Generate a type family representing an existentially-quantified variable
 genExTyFams :: Dec -> Q [Dec]
@@ -265,10 +346,7 @@ genExTyFams' _ = return []
 
 genExTyFams'' :: TyVarBndr -> Name -> Q Dec
 genExTyFams''   (PlainTV  n)   nm = genExTyFams'' (KindedTV n StarK) nm
-genExTyFams'' b@(KindedTV n k) nm = 
-        do x <- familyKindD typeFam nm [b] StarK
-           runIO (putStrLn ("exTyFams: " ++ show x))
-           return x
+genExTyFams'' b@(KindedTV n k) nm = familyKindD typeFam nm [b] StarK
 
 -- Generate the mobility rules and null cases for the existential type families
 genExTyFamInsts :: [Dec] -> Dec -> Q [Dec]
@@ -290,16 +368,16 @@ genExTyFamInsts' decs (ForallC vs cxt c) =
          tySynInst nm ty x = TySynInstD nm [ty] x
 
      return (  [ tySynInst (exTyFamName nm) ty (VarT nm) | (nm, ty) <- mR ]
-            ++ [ tySynInst nm ty (ConT ''Z) | ty <- nC, nm <- exTyFamNames ])
+            ++ [ tySynInst nm ty (ConT ''Z) | (_,ty) <- nC, nm <- exTyFamNames])
 genExTyFamInsts' _ _ = return []
 
 -- Compute the types which need null cases for every existential type family
-nullCase :: [a] -> Cxt -> [Type]
+nullCase :: [a] -> Cxt -> [(Type,Type)]
 nullCase [] = concatMap nullCase' where
-  nullCase' :: Pred -> [Type]
+  nullCase' :: Pred -> [(Type,Type)]
   nullCase' (EqualP (VarT _) (VarT _)) = []
   nullCase' (EqualP (VarT a) x) = if (everything (||) (False `mkQ` hasVar) x)
-                                    then [] else [x]
+                                    then [] else [(VarT a, x)]
   nullCase' (EqualP x (VarT a)) = nullCase' (EqualP (VarT a) x)
   nullCase' _                   = []
   hasVar :: Type -> Bool
