@@ -103,9 +103,15 @@ gadtInstance cl ty fn df = do
                        Just t  -> t
         f x        = x
 
-      mkInst :: TypeArgsEqs -> Dec
-      mkInst t = InstanceD (map mkCxt (args t)) 
-                           (ConT cl `AppT` subst (teqs t) typ) instBody
+      mkInsts :: [TypeArgsEqs] -> [Dec]
+      -- Types without type equalities (not real GADTs) should not have
+      -- class constraints. Using simplInstance for them would be wrong because
+      -- that does not know that types can be indices and not parameters.
+      mkInsts [] = [InstanceD [] (ConT cl `AppT` typ) instBody]
+      mkInsts l = map mkInst l where
+        mkInst :: TypeArgsEqs -> Dec
+        mkInst t = InstanceD (map mkCxt (args t)) 
+                             (ConT cl `AppT` subst (teqs t) typ) instBody
 
       mkCxt :: Type -> Pred
       mkCxt = ClassP cl . (:[])
@@ -169,13 +175,10 @@ gadtInstance cl ty fn df = do
 
       allTypeArgsEqs = eqs idxs (snd dt)
     
-      normInsts = map mkInst (filterMerge allTypeArgsEqs)
+      normInsts = mkInsts (filterMerge allTypeArgsEqs)
       ncInsts   = map mkNcInst (nub (map fst ncTys))
 
-  if and (map (null . teqs) allTypeArgsEqs)
-   -- Turns out the type is not a GADT at all, fall back to simplInstance
-   then simplInstance cl ty fn df
-    else return $ normInsts ++ ncInsts
+  return $ normInsts ++ ncInsts
 
 
 -- | Given the type and the name (as string) for the type to derive,
