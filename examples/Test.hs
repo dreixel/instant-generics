@@ -391,3 +391,17 @@ instance GEnum (Term Z) where genum' = error "never happens"
 -- Testing
 gshowTerm = show (Pair (If (IsZero (Lit 1)) (Lit 2) (Lit 0)) (Lit 1))
 genumTerm = show (take 10 (genum :: [Term (Bool,Int)]))
+
+-- Example 4: Fin
+
+data Fin n where
+  FZe ::          Fin (Su n)
+  FSu :: Fin n -> Fin (Su n)
+{-
+data Fin n = forall m. (n ~ Su m) => FZe
+           | forall m. (n ~ Su m) => FSu (Fin m)
+-}
+deriveAll ''Fin
+
+simplInstance ''Show ''Fin 'show' 'show
+gadtInstance  ''GEnum ''Fin 'genum' 'genum

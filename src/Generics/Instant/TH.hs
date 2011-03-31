@@ -37,12 +37,17 @@ import Generics.SYB (everywhere, mkT, everything, mkQ, gshow)
 import Language.Haskell.TH hiding (Fixity())
 import Language.Haskell.TH.Syntax (Lift(..), showName)
 
-import Data.List (intercalate, nub)
+import Data.List (intercalate, nub, elemIndex)
 import qualified Data.Map as M
 import Control.Monad
 import Control.Arrow ((&&&))
 import Debug.Trace
 
+-- Used by gadtInstance
+data TypeArgsEqs = TypeArgsEqs { args :: [Type]        -- ^ Constructor args
+                               , vars :: [Name]        -- ^ Variables
+                               , teqs :: [(Type,Type)] -- ^ Type equalities
+                               } deriving Show
 
 -- | Given the names of a generic class, a type to instantiate, a function in
 -- the class and the default implementation, generates the code for a basic
@@ -55,7 +60,10 @@ simplInstance cl ty fn df = do
   fmap (: []) $ instanceD (cxt []) (conT cl `appT` typ)
     [funD fn [clause [] (normalB (varE df)) []]]
 
-
+-- | Given the names of a generic class, a GADT type to instantiate, a function
+-- in the class and the default implementation, generates the code for a basic
+-- generic instance. This is tricky in general because we have to analyze the
+-- return types of each of the GADT constructors and give instances accordingly.
 gadtInstance :: Name -> Name -> Name -> Name -> Q [Dec]
 gadtInstance cl ty fn df = do
   i <- reify ty
@@ -71,15 +79,18 @@ gadtInstance cl ty fn df = do
       idxs :: [Name]
       idxs = extractIndices (fst dt) (snd dt)
 
-      -- List of all the type equalities introduced by the constructors
-      eqs :: [Name] -> [Con] -> [([Type], [(Type,Type)])]
+      -- Get all the arguments, variables, and type equalities introduced by the
+      -- constructors
+      eqs :: [Name] -> [Con] -> [TypeArgsEqs]
       eqs nms cs = map f cs where
-        f :: Con -> ([Type], [(Type,Type)])
-        f (NormalC _ tys)    = (map snd tys, [])
-        f (RecC _ tys)       = (map (\(_,_,t) -> t) tys, [])
-        f (InfixC t1 _ t2)   = ([snd t1, snd t2],[])
-        f (ForallC vs cxt c) = case f c of 
-                                 (ts, eqs') -> (ts, (concatMap g cxt) ++ eqs')
+        f :: Con -> TypeArgsEqs
+        f (NormalC _ tys)    = TypeArgsEqs (map snd tys)             [] []
+        f (RecC _ tys)       = TypeArgsEqs (map (\(_,_,t) -> t) tys) [] []
+        f (InfixC t1 _ t2)   = TypeArgsEqs [snd t1, snd t2]          [] []
+        f (ForallC vs cxt c) = case f c of
+            TypeArgsEqs ts vs' eqs' -> 
+              TypeArgsEqs ts (tyVarBndrsToNames vs ++ vs') 
+                          ((concatMap g cxt) ++ eqs')
         g :: Pred -> [(Type,Type)]
         g (EqualP (VarT t1) t2) | t1 `elem` nms = [(VarT t1,t2)]
                                 | otherwise     = []
@@ -92,13 +103,14 @@ gadtInstance cl ty fn df = do
                        Just t  -> t
         f x        = x
 
-      mkInst :: ([Type], [(Type,Type)]) -> Dec
-      mkInst (args, tyEqs) = InstanceD (map mkCxt args) 
-                               (ConT cl `AppT` subst tyEqs typ) instBody
+      mkInst :: TypeArgsEqs -> Dec
+      mkInst t = InstanceD (map mkCxt (args t)) 
+                           (ConT cl `AppT` subst (teqs t) typ) instBody
 
       mkCxt :: Type -> Pred
-      mkCxt t = ClassP cl [t]
+      mkCxt = ClassP cl . (:[])
 
+      -- The instance body is empty for regular cases
       instBody :: [Dec]
       instBody = [FunD fn [Clause [] (NormalB (VarE df)) []]]
 
@@ -110,6 +122,7 @@ gadtInstance cl ty fn df = do
         f (ForallC _ c _) = [c]
         f _               = []
 
+      -- The instance body is undefined for the null cases
       mkNcInst :: Type -> Dec
       mkNcInst t = InstanceD [] (ConT cl `AppT` subst [(t,ConT ''Z)] typ) 
                      [FunD fn [Clause [] (NormalB errorE) []]]
@@ -121,22 +134,48 @@ gadtInstance cl ty fn df = do
                  ++ "\nncTys -> " ++ show ncTys
                  ++ "\nallEqs -> " ++ show (eqs idxs (snd dt)))
 
-      update :: (Eq a, Eq b) => ([a],b) -> [([a],b)] -> [([a],b)]
-      update (a,b) [] = []
-      update (a,b) ((a',b'):t) | b == b'   = (nub (a++a'),b) : t
-                               | otherwise = (a',b') : update (a,b) t
+      update :: TypeArgsEqs -> [TypeArgsEqs] -> [TypeArgsEqs]
+      update _ [] = []
+      update t1 (t2:ts) | teqs t1 == teqs t2 = 
+                            t2 {args = nub (args t1 ++ args t2)} : ts
+                        | otherwise          = t2 : update t1 ts
 
-      filterMerge :: [([Type], [(Type,Type)])] -> [([Type], [(Type,Type)])]
-      filterMerge ((a,b):t)  = case filterMerge t of
-                                 l -> if b `elem` (map snd l)
-                                       then update (a,b) l
-                                      else (a,b) : l
-      filterMerge []         = []
+      -- We need to
+      -- 1) ignore constructors that don't introduce any type equalities
+      -- 2) merge constructors with the same return type
+      filterMerge :: [TypeArgsEqs] -> [TypeArgsEqs]
+      filterMerge (t0@(TypeArgsEqs ts vs eqs):t)
+        | eqs == [] = filterMerge t
+        | otherwise = case filterMerge t of
+                        l -> if or (concat 
+                                  [ [ typeMatch vs (vars t2) eq1 eq2
+                                    | eq1 <- eqs, eq2 <- teqs t2 ] | t2 <- l ])
+                             then update t0 l
+                             else t0 : l
+      filterMerge [] = []
 
-      normInsts = map mkInst (filterMerge (eqs idxs (snd dt)))
+      -- For (2) above, we need to consider type equality modulo
+      -- quantified-variable names
+      typeMatch :: [Name] -> [Name] -> (Type,Type) -> (Type,Type) -> Bool
+      typeMatch vs1 vs2 eq1 eq2 | length vs1 /= length vs2 = False 
+                                | otherwise 
+                                = eq1 == everywhere (mkT f) eq2
+        where f (VarT n) = case n `elemIndex` vs2 of
+                             -- is not a quantified variable
+                             Nothing -> VarT n
+                             -- it is, replace it with the equivalent var
+                             Just i  -> VarT (vs1 !! i)
+              f x        = x
+
+      allTypeArgsEqs = eqs idxs (snd dt)
+    
+      normInsts = map mkInst (filterMerge allTypeArgsEqs)
       ncInsts   = map mkNcInst (nub (map fst ncTys))
 
-  return $ normInsts ++ ncInsts
+  if and (map (null . teqs) allTypeArgsEqs)
+   -- Turns out the type is not a GADT at all, fall back to simplInstance
+   then simplInstance cl ty fn df
+    else return $ normInsts ++ ncInsts
 
 
 -- | Given the type and the name (as string) for the type to derive,
