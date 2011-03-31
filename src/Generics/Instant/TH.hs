@@ -103,15 +103,9 @@ gadtInstance cl ty fn df = do
                        Just t  -> t
         f x        = x
 
-      mkInsts :: [TypeArgsEqs] -> [Dec]
-      -- Types without type equalities (not real GADTs) should not have
-      -- class constraints. Using simplInstance for them would be wrong because
-      -- that does not know that types can be indices and not parameters.
-      mkInsts [] = [InstanceD [] (ConT cl `AppT` typ) instBody]
-      mkInsts l = map mkInst l where
-        mkInst :: TypeArgsEqs -> Dec
-        mkInst t = InstanceD (map mkCxt (args t)) 
-                             (ConT cl `AppT` subst (teqs t) typ) instBody
+      mkInst :: TypeArgsEqs -> Dec
+      mkInst t = InstanceD (map mkCxt (args t)) 
+                           (ConT cl `AppT` subst (teqs t) typ) instBody
 
       mkCxt :: Type -> Pred
       mkCxt = ClassP cl . (:[])
@@ -141,17 +135,26 @@ gadtInstance cl ty fn df = do
                  ++ "\nallEqs -> " ++ show (eqs idxs (snd dt)))
 
       update :: TypeArgsEqs -> [TypeArgsEqs] -> [TypeArgsEqs]
-      update _ [] = []
+      update t1 [] = [t1]
       update t1 (t2:ts) | teqs t1 == teqs t2 = 
                             t2 {args = nub (args t1 ++ args t2)} : ts
                         | otherwise          = t2 : update t1 ts
 
+      -- Types without any type equalities (not real GADTs) need to be handled
+      -- differently. Others are dealt with using filterMerge.
+      handleADTs :: ([TypeArgsEqs] -> [TypeArgsEqs]) 
+                 -> [TypeArgsEqs] -> [TypeArgsEqs]
+      handleADTs f ts | and (map (null . teqs) ts) 
+                      = [TypeArgsEqs (concatMap args ts) [] []]
+                      | otherwise = f ts                      
+
       -- We need to
       -- 1) ignore constructors that don't introduce any type equalities
       -- 2) merge constructors with the same return type
+      -- This code is terribly inefficient and could easily be improved, btw.
       filterMerge :: [TypeArgsEqs] -> [TypeArgsEqs]
       filterMerge (t0@(TypeArgsEqs ts vs eqs):t)
-        | eqs == [] = filterMerge t
+        | eqs == [] = update t0 (filterMerge t)
         | otherwise = case filterMerge t of
                         l -> if or (concat 
                                   [ [ typeMatch vs (vars t2) eq1 eq2
@@ -175,7 +178,7 @@ gadtInstance cl ty fn df = do
 
       allTypeArgsEqs = eqs idxs (snd dt)
     
-      normInsts = mkInsts (filterMerge allTypeArgsEqs)
+      normInsts = map mkInst   (handleADTs filterMerge allTypeArgsEqs)
       ncInsts   = map mkNcInst (nub (map fst ncTys))
 
   return $ normInsts ++ ncInsts
