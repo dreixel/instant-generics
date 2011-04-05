@@ -114,26 +114,6 @@ gadtInstance cl ty fn df = do
       instBody :: [Dec]
       instBody = [FunD fn [Clause [] (NormalB (VarE df)) []]]
 
-      ncTys :: [(Type,Type)]
-      ncTys = concatMap (nullCase []) (allCtxs (snd dt))
-      allCtxs :: [Con] -> [Cxt]
-      allCtxs = everything (++) ([] `mkQ` f) where
-        f :: Con -> [Cxt]
-        f (ForallC _ c _) = [c]
-        f _               = []
-
-      -- The instance body is undefined for the null cases
-      mkNcInst :: Type -> Dec
-      mkNcInst t = InstanceD [] (ConT cl `AppT` subst [(t,ConT ''Z)] typ) 
-                     [FunD fn [Clause [] (NormalB errorE) []]]
-
-      errorE :: Exp
---      errorE = VarE 'undefined
-      errorE = VarE 'error `AppE` LitE (StringL $
-                    "should not happen. Debug info:\ndt -> " ++ show dt
-                 ++ "\nncTys -> " ++ show ncTys
-                 ++ "\nallEqs -> " ++ show (eqs idxs (snd dt)))
-
       update :: Bool -> TypeArgsEqs -> [TypeArgsEqs] -> [TypeArgsEqs]
       update True  t1 [] = [t1]
       update False _  [] = []
@@ -180,9 +160,8 @@ gadtInstance cl ty fn df = do
       allTypeArgsEqs = eqs idxs (snd dt)
     
       normInsts = map mkInst   (handleADTs filterMerge allTypeArgsEqs)
-      ncInsts   = map mkNcInst (nub (map fst ncTys))
 
-  return $ normInsts ++ ncInsts
+  return $ normInsts
 
 
 -- | Given the type and the name (as string) for the type to derive,
@@ -402,8 +381,7 @@ genExTyFamInsts ds (NewtypeD _ _ _ c  _) = genExTyFamInsts' ds c
 
 genExTyFamInsts' :: [Dec] -> Con -> Q [Dec]
 genExTyFamInsts' decs (ForallC vs cxt c) = 
-  do let nC = nullCase      (tyVarBndrsToNames vs) cxt
-         mR = mobilityRules (tyVarBndrsToNames vs) cxt
+  do let mR = mobilityRules (tyVarBndrsToNames vs) cxt
 
          exTyFamNames = map getName decs
 
@@ -413,23 +391,8 @@ genExTyFamInsts' decs (ForallC vs cxt c) =
 
          tySynInst nm ty x = TySynInstD nm [ty] x
 
-     return (  [ tySynInst (exTyFamName nm) ty (VarT nm) | (nm, ty) <- mR ]
-            ++ [ tySynInst nm ty (ConT ''Z) | (_,ty) <- nC, nm <- exTyFamNames])
+     return [ tySynInst (exTyFamName nm) ty (VarT nm) | (nm, ty) <- mR ]
 genExTyFamInsts' _ _ = return []
-
--- Compute the types which need null cases for every existential type family
-nullCase :: [a] -> Cxt -> [(Type,Type)]
-nullCase [] = concatMap nullCase' where
-  nullCase' :: Pred -> [(Type,Type)]
-  nullCase' (EqualP (VarT _) (VarT _)) = []
-  nullCase' (EqualP (VarT a) x) = if (everything (||) (False `mkQ` hasVar) x)
-                                    then [] else [(VarT a, x)]
-  nullCase' (EqualP x (VarT a)) = nullCase' (EqualP (VarT a) x)
-  nullCase' _                   = []
-  hasVar :: Type -> Bool
-  hasVar (VarT _) = True
-  hasVar _        = False
-nullCase _ = const []
 
 -- Compute the shape of the mobility rules
 mobilityRules :: [Name] -> Cxt -> [(Name,Type)]
