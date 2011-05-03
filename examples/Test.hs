@@ -33,7 +33,7 @@ instance (GEnum a) => GEnum (Var a) where
   genum' = map Var genum'
 
 instance (GEnum a) => GEnum (CEq c p p a) where genum' = map C genum'
-instance (GEnum a) => GEnum (CEq c p q a) where genum' = []
+instance              GEnum (CEq c p q a) where genum' = []
 
 instance (GEnum f, GEnum g) => GEnum (f :+: g) where
   genum' = map L genum' ||| map R genum'
@@ -256,8 +256,6 @@ genumG1 = show (take 100 $ genum :: [G1 Int])
 -- Example 2: vectors
 
 -- Type-level naturals
-data Ze
-data Su n
 
 -- Vec has a parameter 'a' and an index 'n'
 data Vec a :: * -> * where
@@ -309,7 +307,7 @@ instance (GEnum a, GEnum (Vec a n)) => GEnum (Vec a (Su n)) where
 instance (GEnum a) => GEnum (Vec a Ze) where
   genum' = genum
 
-instance GEnum (Vec a Z) where genum' = error "never happens"
+--instance GEnum (Vec a Z) where genum' = error "never happens"
 
 -- Testing
 gshowVec = show (Cons 'p' Nil)
@@ -375,6 +373,7 @@ instance Representable (Term a) where
   to (R (R (C (Rec b :*: Rec x :*: Rec y)))) = If b x y
   to (R (L (C (Rec a :*: Rec b)))) = Pair a b
 -}
+
 -- Generic function instances
 --instance Show (Term a) where show' = show
 simplInstance ''Show ''Term 'show' 'show

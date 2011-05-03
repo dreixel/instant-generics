@@ -195,9 +195,8 @@ deriveRep n = do
             TyConI dec -> dec
             _ -> error "unknown construct"
   
-  exTyFams      <- genExTyFams d
-  exTyFamsInsts <- genExTyFamInsts exTyFams d
-  fmap (: (exTyFams ++ exTyFamsInsts)) $ 
+  exTyFamsInsts <- genExTyFamInsts d
+  fmap (: exTyFamsInsts) $ 
     tySynD (genRepName n) (typeVariables i) (repType d (typeVariables i))
 
 deriveInst :: Name -> Q [Dec]
@@ -334,64 +333,53 @@ repConGADT d@(dt, dtVs) repVs [indexVar] (ForallC vs ctx c) =
   do
      let
         genTypeEqs ((EqualP t1 t2):r) | otherwise = case genTypeEqs r of 
-            (t1s,t2s) -> ( ConT ''(:*:) `AppT` (substTyVar exEnv t1) `AppT` t1s
-                         , ConT ''(:*:) `AppT` (substTyVar exEnv t2) `AppT` t2s)
+            (t1s,t2s) -> ( ConT ''(:*:) `AppT` (substTyVar vsN t1) `AppT` t1s
+                         , ConT ''(:*:) `AppT` (substTyVar vsN t2) `AppT` t2s)
         genTypeEqs (_:r) = genTypeEqs r -- other constraints are ignored
         genTypeEqs []    = baseEqs
 
-        substTyVar :: M.Map Name Name -> Type -> Type
-        substTyVar env = everywhere (mkT f) where
-          f (VarT v) = case M.lookup v env of
+        substTyVar :: [Name] -> Type -> Type
+        substTyVar ns = everywhere (mkT f) where
+          f (VarT v) = case elemIndex v ns of
                          Nothing -> VarT v
-                         Just t  -> ConT t `AppT` VarT indexVar
+                         Just i  -> ConT ''Ex 
+                                     `AppT` ConT (genName [dt,getConName c])
+                                     `AppT` int2TLNat i
+                                     `AppT` VarT indexVar
           f x        = x
 
-        exEnv :: M.Map Name Name
-        exEnv = M.fromList . map (id &&& exTyFamName) $ tyVarBndrsToNames vs
+        vsN :: [Name]
+        vsN = tyVarBndrsToNames vs
 
      -- Go on with generating the representation type, taking the equalities
-     repCon (dt, dtVs) (everywhere (mkT (substTyVar exEnv)) c) (genTypeEqs ctx)
+     repCon (dt, dtVs) (everywhere (mkT (substTyVar vsN)) c) (genTypeEqs ctx)
 -- No constraints, go on as usual
 repConGADT d _repVs _ c = repCon d c baseEqs
 
--- Generates an existential type family name from a variable name
-exTyFamName :: Name -> Name
-exTyFamName = mkName . ("Ex_" ++) . showName
+-- Extract the constructor name
+getConName :: Con -> Name
+getConName (NormalC n _)   = n
+getConName (RecC n _)      = n
+getConName (InfixC _ n _)  = n
+getConName (ForallC _ _ c) = getConName c
 
--- Generate a type family representing an existentially-quantified variable
-genExTyFams :: Dec -> Q [Dec]
-genExTyFams (DataD    _ _ _ cs _) = fmap concat (mapM genExTyFams' cs)
-genExTyFams (NewtypeD _ _ _ c  _) = genExTyFams' c
-genExTyFams _                     = return []
+-- Generate a type-level natural from an Int
+int2TLNat :: Int -> Type
+int2TLNat 0 = ConT ''Ze
+int2TLNat n = ConT ''Su `AppT` int2TLNat (n-1)
 
-genExTyFams' :: Con -> Q [Dec]
-genExTyFams' (ForallC vs _ _) =
-  mapM (\x -> genExTyFams'' x (exTyFamName (tyVarBndrToName x))) vs
-genExTyFams' _ = return []
+-- Generate the mobility rules for the existential type families
+genExTyFamInsts :: Dec -> Q [Dec]
+genExTyFamInsts (DataD    _ n _ cs _) = fmap concat $ 
+                                          mapM (genExTyFamInsts' n) cs
+genExTyFamInsts (NewtypeD _ n _ c  _) = genExTyFamInsts' n c
 
-genExTyFams'' :: TyVarBndr -> Name -> Q Dec
-genExTyFams''   (PlainTV  n)   nm = genExTyFams'' (KindedTV n StarK) nm
-genExTyFams'' b@(KindedTV n k) nm = familyKindD typeFam nm [b] StarK
-
--- Generate the mobility rules and null cases for the existential type families
-genExTyFamInsts :: [Dec] -> Dec -> Q [Dec]
-genExTyFamInsts ds (DataD    _ _ _ cs _) = fmap concat $ 
-                                             mapM (genExTyFamInsts' ds) cs
-genExTyFamInsts ds (NewtypeD _ _ _ c  _) = genExTyFamInsts' ds c
-
-genExTyFamInsts' :: [Dec] -> Con -> Q [Dec]
-genExTyFamInsts' decs (ForallC vs cxt c) = 
+genExTyFamInsts' :: Name -> Con -> Q [Dec]
+genExTyFamInsts' dt (ForallC vs cxt c) = 
   do let mR = mobilityRules (tyVarBndrsToNames vs) cxt
-
-         exTyFamNames = map getName decs
-
-         getName :: Dec -> Name
-         getName (FamilyD _ nm _ _) = nm
-         getName _                  = error "getName: impossible"
-
-         tySynInst nm ty x = TySynInstD nm [ty] x
-
-     return [ tySynInst (exTyFamName nm) ty (VarT nm) | (nm, ty) <- mR ]
+         conName = ConT (genName [dt,getConName c])
+         tySynInst ty n x = TySynInstD ''Ex [conName, int2TLNat n, ty] x
+     return [ tySynInst ty n (VarT nm) | (n,(nm, ty)) <- zip [0..] mR ]
 genExTyFamInsts' _ _ = return []
 
 -- Compute the shape of the mobility rules
