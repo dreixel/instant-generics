@@ -45,7 +45,7 @@ module Generics.Instant.Base (
       Z, U(..), (:+:)(..), (:*:)(..), CEq(..), C, Var(..), Rec(..)
     , Constructor(..), Fixity(..), Associativity(..)
     , Representable(..)
-    , Ex, Ze, Su
+    , X, Ze, Su
   ) where
 
 infixr 5 :+:
@@ -101,7 +101,7 @@ class Representable a where
   -}
 
 -- Type family for representing existentially-quantified variables
-type family Ex c n a
+type family X c n a
 
 -- Type-level natural numbers
 data Ze :: *
