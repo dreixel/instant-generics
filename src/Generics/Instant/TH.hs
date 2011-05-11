@@ -419,11 +419,11 @@ repCon (dt, vs) (NormalC n fs) (t1,t2) =
     prod :: Q Type -> Q Type -> Q Type
     prod a b = conT ''(:*:) `appT` a `appT` b
 repCon (dt, vs) r@(RecC n []) (t1,t2)  =
-    conT ''C `appT` (conT $ genName [dt, n]) `appT` return t1
-                                             `appT` return t2 `appT` conT ''U
+    conT ''CEq `appT` (conT $ genName [dt, n]) `appT` return t1
+                                               `appT` return t2 `appT` conT ''U
 repCon (dt, vs) r@(RecC n fs) (t1,t2) =
-    conT ''C `appT` (conT $ genName [dt, n]) `appT` return t1 
-                                             `appT` return t2 `appT` 
+    conT ''CEq `appT` (conT $ genName [dt, n]) `appT` return t1 
+                                               `appT` return t2 `appT` 
       (foldBal prod (map (repField' (dt, vs) n) fs)) where
     prod :: Q Type -> Q Type -> Q Type
     prod a b = conT ''(:*:) `appT` a `appT` b
