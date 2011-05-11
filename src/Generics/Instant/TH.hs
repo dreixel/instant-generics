@@ -342,7 +342,7 @@ repConGADT d@(dt, dtVs) repVs [indexVar] (ForallC vs ctx c) =
         substTyVar ns = everywhere (mkT f) where
           f (VarT v) = case elemIndex v ns of
                          Nothing -> VarT v
-                         Just i  -> ConT ''Ex 
+                         Just i  -> ConT ''X 
                                      `AppT` ConT (genName [dt,getConName c])
                                      `AppT` int2TLNat i
                                      `AppT` VarT indexVar
@@ -378,7 +378,7 @@ genExTyFamInsts' :: Name -> Con -> Q [Dec]
 genExTyFamInsts' dt (ForallC vs cxt c) = 
   do let mR = mobilityRules (tyVarBndrsToNames vs) cxt
          conName = ConT (genName [dt,getConName c])
-         tySynInst ty n x = TySynInstD ''Ex [conName, int2TLNat n, ty] x
+         tySynInst ty n x = TySynInstD ''X [conName, int2TLNat n, ty] x
      return [ tySynInst ty n (VarT nm) | (n,(nm, ty)) <- zip [0..] mR ]
 genExTyFamInsts' _ _ = return []
 
