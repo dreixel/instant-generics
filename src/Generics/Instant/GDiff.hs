@@ -11,11 +11,11 @@ module Generics.Instant.GDiff
   , Ex(..)
   ) where
 
-import Control.Arrow
 import Data.Array
 
 import Data.Typeable
 import GHC.Prim
+import GHC.Base (Int(..))
 
 
 -- GP lib
@@ -59,8 +59,11 @@ instance Children Char
 instance Children Int
 
 instance (GDiff a) => Children [a] where
+{-
   children []    = []
   children (h:t) = [Ex h, Ex t]
+-}
+  children l = map Ex l
 
 childrenDef :: (Representable a, Children' (Rep a)) => a -> [Ex]
 childrenDef x = children' (from x)
@@ -115,20 +118,17 @@ instance Show Ex where
 --------------------------------------------------------------------------------
 
 -- | Edit actions
-data Edit = Cpy !Ex | Del !Ex | Ins !Ex deriving Show
+data Edit = Cpy | Del | Ins deriving Show
 
 -- | Editscript
-data EditScript = ES !Int# [Edit] deriving Show
+data EditScript = ES !Int# !Int# !Int# deriving Show
 
 editScriptLen :: EditScript -> Int
-editScriptLen (ES _ l) = editScriptLen' l where
-  editScriptLen' []          = 0
-  editScriptLen' ((Cpy _):t) = editScriptLen' t
-  editScriptLen' (_      :t) = 1 + editScriptLen' t
+editScriptLen (ES _c d i) = I# (d +# i)
 
 infixr 4 &
 (&) :: EditScript -> EditScript -> EditScript
-l@(ES m _) & r@(ES n _) = if m <=# n then l else r
+l@(ES a b c) & r@(ES x y z) = if (a +# b +# c) <=# (x +# y +# z) then l else r
 
 --------------------------------------------------------------------------------
 -- Memoization
@@ -139,26 +139,27 @@ gdiffm x y = table ! (length x, length y) where
   table :: Table
   table = 
     array ((0,0),(length x,length y))
-      [ ((m,n),ES 0# []) | m <- [0..length x], n <- [0..length y]] //
+      [ ((m,n),ES 0# 0# 0#) | m <- [0..length x], n <- [0..length y]] //
 
-    [ ((0,n), add (Ins (y !! (n-1))) (0,n-1))
-    | n <- [1..length y] ] //
+    [ ((0,n), add Ins (0,n-1)) | n <- [1..length y] ] //
 
-    [ ((n,0), add (Del (x !! (n-1))) (n-1,0))
-    | n <- [1..length x] ] //
+    [ ((n,0), add Del (n-1,0)) | n <- [1..length x] ] //
 
     [ ((m,n), gen m n) | m <- [1..length x], n <- [1.. length y] ]
 
   gen m n = case (x !! (m-1), y !! (n-1)) of
     (Ex x', Ex y') -> (if typeOf x' == typeOf y' && x' `shallowEq` (ucast y')
                         -- && length xs == length ys -- do we need this?
-                       then (add (Cpy (Ex x')) (m-1,n-1)) & alt
+                       then (add Cpy (m-1,n-1)) & alt
                        else alt) where
-      alt = add (Del (x !! (m-1))) (m-1,n) &
-            add (Ins (y !! (n-1))) (m,n-1)
+      alt = add Del (m-1,n) & add Ins (m,n-1)
 
   add :: Edit -> (Int,Int) -> EditScript
-  add e (a,b) = case table ! (a,b) of ES n l -> ES (n +# 1#) (e:l)
+  add e (a,b) = case table ! (a,b) of 
+                  ES c d i -> case e of
+                                Cpy -> ES (c +# 1#) d i
+                                Del -> ES c (d +# 1#) i
+                                Ins -> ES c d (i +# 1#)
 
 allChildren :: Ex -> [Ex]
 allChildren (Ex a) = Ex a : concatMap allChildren (children a)
