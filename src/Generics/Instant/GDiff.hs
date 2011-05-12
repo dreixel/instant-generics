@@ -5,9 +5,8 @@
 {-# LANGUAGE MagicHash            #-}
 
 module Generics.Instant.GDiff 
-  ( diff, patch, diffLen, GDiff
+  ( diff, diffLen, GDiff
   , SEq(..), shallowEqDef
-  , Build(..), buildDef
   , Children(..), childrenDef
   , Ex(..)
   ) where
@@ -68,52 +67,6 @@ childrenDef x = children' (from x)
 
 --------------------------------------------------------------------------------
 
-class Build' a where
-  build' :: a -> [Ex] -> Maybe (a, [Ex])
-  build' c l = Just (c,l)
-
-instance Build' U
-
-instance (Build' a, Build' b) => Build' (a :+: b) where
-  build' (L a) l = fmap (first L) (build' a l)
-  build' (R a) l = fmap (first R) (build' a l)
-
-instance (Build' a, Build' b) => Build' (a :*: b) where
-  build' (a :*: b) l = do (r,l') <- build' a l
-                          fmap (first (r :*:)) (build' b l')
-
-instance (Build' a) => Build' (CEq c p q a) where
-  build' (C a) l = fmap (first C) (build' a l)
-
-instance (GDiff a) => Build' (Var a) where
-  build' (Var _) []         = Nothing
-  build' (Var _) ((Ex h):t) = cast h >>= return . flip (,) t . Var
-
-instance (GDiff a) => Build' (Rec a) where
-  build' (Rec _) []         = Nothing
-  build' (Rec _) ((Ex h):t) = cast h >>= return . flip (,) t . Rec
-
-
--- | Rebuilds a term, replacing the children with elements from the list
-class Build a where
-  build :: a -> [Ex] -> Maybe (a, [Ex])
-  build c l = Just (c,l)
-
-instance Build Char
-instance Build Int
-
-instance (Typeable a) => Build [a]  where
-  build [] l = Just ([],l)
-  build _ ((Ex h'):(Ex t'):r) = do h <- cast h'
-                                   t <- cast t'
-                                   Just (h:t,r)
-  build _ _ = Nothing
-
-buildDef :: (Representable a, Build' (Rep a)) => a -> [Ex] -> Maybe (a, [Ex])
-buildDef x = fmap (first to) . build' (from x)
-
---------------------------------------------------------------------------------
-
 -- Shallow equality
 class SEq' a where
   shallowEq' :: a -> a -> Bool
@@ -146,7 +99,7 @@ shallowEqDef x y = shallowEq' (from x) (from y)
 --------------------------------------------------------------------------------
 
 -- | Tying the recursive knot
-class (Typeable a, SEq a, Children a, Build a) => GDiff a
+class (Typeable a, SEq a, Children a) => GDiff a
 
 instance GDiff Char
 instance GDiff Int
@@ -176,27 +129,6 @@ editScriptLen (ES _ l) = editScriptLen' l where
 infixr 4 &
 (&) :: EditScript -> EditScript -> EditScript
 l@(ES m _) & r@(ES n _) = if m <=# n then l else r
-
-
--- | Generic patch
-gpatch :: EditScript -> [Ex] -> Maybe [Ex]
-gpatch (ES 0# [])        [] = Just []
-gpatch (ES 0# [])        _  = Nothing
-gpatch (ES n  (Ins x:t)) ys =                 gpatch (ES (n -# 1#) t) ys >>= insert x
-gpatch (ES n  (Del x:t)) ys = delete x ys >>= gpatch (ES (n -# 1#) t)
-gpatch (ES n  (Cpy x:t)) ys = delete x ys >>= gpatch (ES (n -# 1#) t)    >>= insert x
-gpatch _ _ = error "impossible"
-
-insert :: Ex -> [Ex] -> Maybe [Ex]
-insert (Ex x) l = case splitAt (length (children x)) l of
-                    (xs, r) -> build x xs >>= Just . (:r) . Ex . fst
-
-delete :: Ex -> [Ex] -> Maybe [Ex]
-delete _ [] = Nothing
-delete (Ex x) ((Ex h):t)
-  | typeOf x == typeOf h && length (children x) == length (children h)
-  = Just (children h ++ t)
-  | otherwise = Nothing
 
 --------------------------------------------------------------------------------
 -- Memoization
@@ -244,12 +176,6 @@ allChildren (Ex x) = ux : concatMap allChildren xs
 -- | Generic diff
 diff :: (GDiff a) => a -> a -> EditScript
 diff x y = gdiffm (reverse (allChildren (Ex x))) (reverse (allChildren (Ex y)))
-
--- | Generic diff
-patch :: (GDiff a) => EditScript -> a -> Maybe a
-patch es x = case gpatch es [Ex x] of
-               Just [Ex h] -> cast h
-               _           -> Nothing
 
 -- | Edit distance
 diffLen :: (GDiff a) => a -> a -> Float
