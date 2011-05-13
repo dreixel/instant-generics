@@ -11,8 +11,9 @@ module Generics.Instant.GDiff
   , Ex(..)
   ) where
 
-import Data.Array
+import qualified Data.Vector as V
 
+import Data.Ix (index)
 import Data.Typeable
 import GHC.Prim
 import GHC.Base (Int(..))
@@ -132,37 +133,37 @@ l@(ES a b c) & r@(ES x y z) = if (a +# b +# c) <=# (x +# y +# z) then l else r
 
 --------------------------------------------------------------------------------
 -- Memoization
-type Table = Array (Int,Int) EditScript
+type Table = V.Vector EditScript
 
-gdiffm :: [Ex] -> [Ex] -> EditScript
-gdiffm x y = table ! (length x, length y) where
+gdiffm :: V.Vector Ex -> V.Vector Ex -> EditScript
+gdiffm x y = table V.! (ix (lx,ly)) where
+  lx, ly :: Int
+  lx = V.length x
+  ly = V.length y
+  ix :: (Int,Int) -> Int
+  ix = index ((0,0),(lx,ly))
   table :: Table
-  table = 
-    array ((0,0),(length x,length y))
-      [ ((m,n),ES 0# 0# 0#) | m <- [0..length x], n <- [0..length y]] //
-
-    [ ((0,n), add Ins (0,n-1)) | n <- [1..length y] ] //
-
-    [ ((n,0), add Del (n-1,0)) | n <- [1..length x] ] //
-
-    [ ((m,n), gen m n) | m <- [1..length x], n <- [1.. length y] ]
-
-  gen m n = case (x !! (m-1), y !! (n-1)) of
+  table =      V.replicate ((lx+1)*(ly+1)) (ES 0# 0# 0#)
+          V.// [ (ix (0,(I# n)), ES 0# 0# n)  | I# n <- [1..ly] ]
+          V.// [ (ix ((I# n),0), ES 0# n  0#) | I# n <- [1..lx] ]
+          V.// [ (ix (m,n)     , gen m n)     | m    <- [1..lx], n <- [1.. ly] ]
+  gen m n = case (x V.! (m-1), y V.! (n-1)) of
     (Ex x', Ex y') -> (if typeOf x' == typeOf y' && x' `shallowEq` (ucast y')
                         -- && length xs == length ys -- do we need this?
-                       then (add Cpy (m-1,n-1)) & alt
+                       then (add Cpy (m-1,n-1) & alt)
                        else alt) where
       alt = add Del (m-1,n) & add Ins (m,n-1)
 
   add :: Edit -> (Int,Int) -> EditScript
-  add e (a,b) = case table ! (a,b) of 
+  add e (a,b) = case table V.! ix (a,b) of 
                   ES c d i -> case e of
                                 Cpy -> ES (c +# 1#) d i
                                 Del -> ES c (d +# 1#) i
                                 Ins -> ES c d (i +# 1#)
 
-allChildren :: Ex -> [Ex]
-allChildren (Ex a) = Ex a : concatMap allChildren (children a)
+allChildren :: Ex -> V.Vector Ex
+allChildren x = let f (Ex a) = Ex a : concatMap f (children a)
+                in V.fromList (f x)
 {-
 -- I thought this would use less memory, but apparently it doesn't
 allChildren (Ex x) = ux : concatMap allChildren xs
@@ -176,9 +177,12 @@ allChildren (Ex x) = ux : concatMap allChildren xs
 -- Top level functions
 -- | Generic diff
 diff :: (GDiff a) => a -> a -> EditScript
-diff x y = gdiffm (reverse (allChildren (Ex x))) (reverse (allChildren (Ex y)))
+diff x y = gdiffm (V.reverse (allChildren (Ex x))) (V.reverse (allChildren (Ex y)))
 
 -- | Edit distance
 diffLen :: (GDiff a) => a -> a -> Float
-diffLen x y = fromIntegral (editScriptLen (diff x y)) / 
-                fromIntegral (length (allChildren (Ex x)))
+diffLen x y = fromIntegral (editScriptLen d) / 
+                fromIntegral (V.length acx + V.length acy)
+  where d   = gdiffm (V.reverse acx) (V.reverse acy)
+        acx = allChildren (Ex x)
+        acy = allChildren (Ex y)
