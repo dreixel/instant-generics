@@ -4,7 +4,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Generics.Instant.TH
--- Copyright   :  (c) 2010 Universiteit Utrecht
+-- Copyright   :  (c) 2011 Universiteit Utrecht
 -- License     :  BSD3
 --
 -- Maintainer  :  generics@haskell.org

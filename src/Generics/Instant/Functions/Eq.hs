@@ -6,7 +6,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Generics.Instant.Functions.Eq
--- Copyright   :  (c) 2010, Universiteit Utrecht
+-- Copyright   :  (c) 2011, Universiteit Utrecht
 -- License     :  BSD3
 --
 -- Maintainer  :  generics@haskell.org
