@@ -1,11 +1,10 @@
 category:               Generics
 copyright:              (c) 2011 Universiteit Utrecht
 name:                   instant-generics
-version:                0.4
+version:                0.3
 license:                BSD3
 license-file:           LICENSE
-author:                 Manuel Chakravarty, Gabriel Ditu, Roman Leshchinskiy,
-                        José Pedro Magalhães
+author:                 José Pedro Magalhães
 maintainer:             generics@haskell.org
 synopsis:               Generic programming library with a sum of products view
 description:               

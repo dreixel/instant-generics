@@ -114,12 +114,12 @@ gadtInstance cl ty fn df = do
       instBody :: [Dec]
       instBody = [FunD fn [Clause [] (NormalB (VarE df)) []]]
 
-      update :: Bool -> TypeArgsEqs -> [TypeArgsEqs] -> [TypeArgsEqs]
-      update True  t1 [] = [t1]
-      update False _  [] = []
-      update b t1 (t2:ts) | teqs t1 == teqs t2 = 
-                              t2 {args = nub (args t1 ++ args t2)} : ts
-                          | otherwise          = t2 : update b t1 ts
+      update :: TypeArgsEqs -> [TypeArgsEqs] -> [TypeArgsEqs]
+      -- update True  t1 [] = [t1]
+      update _  [] = []
+      update t1 (t2:ts) | teqs t1 == teqs t2 = 
+                            t2 {args = nub (args t1 ++ args t2)} : ts
+                        | otherwise          = t2 : update t1 ts
 
       -- Types without any type equalities (not real GADTs) need to be handled
       -- differently. Others are dealt with using filterMerge.
@@ -135,12 +135,12 @@ gadtInstance cl ty fn df = do
       -- This code is terribly inefficient and could easily be improved, btw.
       filterMerge :: [TypeArgsEqs] -> [TypeArgsEqs]
       filterMerge (t0@(TypeArgsEqs ts vs eqs):t)
-        | eqs == [] = update True t0 (filterMerge t)
+        | eqs == [] = update t0 (filterMerge t)
         | otherwise = case filterMerge t of
                         l -> if or (concat 
                                   [ [ typeMatch vs (vars t2) eq1 eq2
                                     | eq1 <- eqs, eq2 <- teqs t2 ] | t2 <- l ])
-                             then update False t0 l
+                             then update t0 l
                              else t0 : l
       filterMerge [] = []
 

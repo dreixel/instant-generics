@@ -17,51 +17,54 @@
 --
 -----------------------------------------------------------------------------
 
-module Generics.Instant.Functions.Eq (Eq(..), eq) where
+module Generics.Instant.Functions.Eq (GEq(..), geqDefault) where
 
 import Generics.Instant.Base
 import Generics.Instant.Instances ()
 
-import Prelude hiding (Eq)
 
 -- Generic eq on Representable (worker)
-class Eq a where
-  eq' :: a -> a -> Bool
+class GEq' a where
+  geq' :: a -> a -> Bool
 
-instance Eq U where
-  eq' U U = True
+instance GEq' U where
+  geq' U U = True
   
-instance (Eq a, Eq b) => Eq (a :+: b) where
-  eq' (L x) (L x') = eq' x x'
-  eq' (R x) (R x') = eq' x x'
-  eq' _      _     = False
+instance (GEq' a, GEq' b) => GEq' (a :+: b) where
+  geq' (L x) (L x') = geq' x x'
+  geq' (R x) (R x') = geq' x x'
+  geq' _      _     = False
   
-instance (Eq a, Eq b) => Eq (a :*: b) where
-  eq' (a :*: b) (a' :*: b') = eq' a a' && eq' b b'
+instance (GEq' a, GEq' b) => GEq' (a :*: b) where
+  geq' (a :*: b) (a' :*: b') = geq' a a' && geq' b b'
   
-instance (Eq a) => Eq (CEq c p q a) where
-  eq' (C a) (C a') = eq' a a'
+instance (GEq' a) => GEq' (CEq c p q a) where
+  geq' (C a) (C a') = geq' a a'
 
-instance Eq a => Eq (Var a) where
-  eq' (Var x) (Var x') = eq' x x'
+instance GEq a => GEq' (Var a) where
+  geq' (Var x) (Var x') = geq x x'
 
-instance (Eq a) => Eq (Rec a) where
-  eq' (Rec x) (Rec x') = eq' x x'
+instance (GEq a) => GEq' (Rec a) where
+  geq' (Rec x) (Rec x') = geq x x'
+
+
+class GEq a where
+  geq :: a -> a -> Bool
 
 -- Dispatcher
-eq :: (Representable a, Eq (Rep a)) => a -> a -> Bool
-eq x y = eq' (from x) (from y)
+geqDefault :: (Representable a, GEq' (Rep a)) => a -> a -> Bool
+geqDefault x y = geq' (from x) (from y)
 
 
 -- Adhoc instances
-instance Eq Int      where eq' = (==)
-instance Eq Integer  where eq' = (==)
-instance Eq Float    where eq' = (==)
-instance Eq Double   where eq' = (==)
-instance Eq Char     where eq' = (==)
-instance Eq Bool     where eq' = (==)
+instance GEq Int      where geq = (==)
+instance GEq Integer  where geq = (==)
+instance GEq Float    where geq = (==)
+instance GEq Double   where geq = (==)
+instance GEq Char     where geq = (==)
+instance GEq Bool     where geq = (==)
 
 -- Generic instances
-instance (Eq a) => Eq (Maybe a)    where eq' = eq
-instance (Eq a) => Eq [a]          where eq' = eq
-instance (Eq a, Eq b) => Eq (a, b) where eq' = eq
+instance (GEq a) => GEq (Maybe a)     where geq = geqDefault
+instance (GEq a) => GEq [a]           where geq = geqDefault
+instance (GEq a, GEq b) => GEq (a, b) where geq = geqDefault
