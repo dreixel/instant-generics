@@ -2,11 +2,12 @@
 {-# LANGUAGE FlexibleInstances        #-}
 {-# LANGUAGE FlexibleContexts         #-}
 {-# LANGUAGE OverlappingInstances     #-}
+{-# LANGUAGE GADTs                    #-}
 
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Generics.Instant.Functions.Show
--- Copyright   :  (c) 2010, Universiteit Utrecht
+-- Copyright   :  (c) 2011, Universiteit Utrecht
 -- License     :  BSD3
 --
 -- Maintainer  :  generics@haskell.org
@@ -17,65 +18,65 @@
 --
 -----------------------------------------------------------------------------
 
-module Generics.Instant.Functions.Show (Show(..), show) where
+module Generics.Instant.Functions.Show (GShow(..), gshowDefault) where
 
 import Generics.Instant.Base
 import Generics.Instant.Instances ()
 
-import Prelude hiding (Show, show)
-import qualified Prelude as P (Show, show)
 import Data.List (intersperse)
 
 -- Generic show on Representable (worker)
-class Show a where
-  show' :: a -> String
+class GShow' a where
+  gshow' :: a -> String
 
-instance Show U where
-  show' U = ""
+instance GShow' U where
+  gshow' U = ""
   
-instance (Show a, Show b) => Show (a :+: b) where
-  show' (L x) = show' x
-  show' (R x) = show' x
+instance (GShow' a, GShow' b) => GShow' (a :+: b) where
+  gshow' (L x) = gshow' x
+  gshow' (R x) = gshow' x
   
-instance (Show a, Show b) => Show (a :*: b) where
-  show' (a :*: b) = show' a `space` show' b
+instance (GShow' a, GShow' b) => GShow' (a :*: b) where
+  gshow' (a :*: b) = gshow' a `space` gshow' b
   
-instance (Show a, Constructor c) => Show (C c a) where
-  show' c@(C a) | show' a == "" = paren $ conName c
-                | otherwise     = paren $ (conName c) `space` show' a
+instance (GShow' a, Constructor c) => GShow' (CEq c p q a) where
+  gshow' c@(C a) | gshow' a == "" = paren $ conName c
+                | otherwise     = paren $ (conName c) `space` gshow' a
 
-instance Show a => Show (Var a) where
-  show' (Var x) = show' x
+instance GShow a => GShow' (Var a) where
+  gshow' (Var x) = gshow x
 
-instance Show a => Show (Rec a) where
-  show' (Rec x) = show' x
+instance GShow a => GShow' (Rec a) where
+  gshow' (Rec x) = gshow x
 
+
+class GShow a where
+  gshow :: a -> String
 
 -- Dispatcher
-show :: (Representable a, Show (Rep a)) => a -> String
-show = show' . from
+gshowDefault :: (Representable a, GShow' (Rep a)) => a -> String
+gshowDefault = gshow' . from
 
 
 -- Adhoc instances
-instance Show Int      where show' = P.show
-instance Show Integer  where show' = P.show
-instance Show Float    where show' = P.show
-instance Show Double   where show' = P.show
-instance Show Char     where show' = P.show
-instance Show Bool     where show' = P.show
+instance GShow Int      where gshow = show
+instance GShow Integer  where gshow = show
+instance GShow Float    where gshow = show
+instance GShow Double   where gshow = show
+instance GShow Char     where gshow = show
+instance GShow Bool     where gshow = show
 
-instance Show a => Show [a] where
-  show' = concat . wrap "[" "]" . intersperse "," . map show'
+instance GShow a => GShow [a] where
+  gshow = concat . wrap "[" "]" . intersperse "," . map gshow
 
-instance Show [Char] where
-  show' = P.show
+instance GShow [Char] where gshow = show
 
-instance (Show a, Show b) => Show (a, b) where
-  show' (a,b) = "(" ++ show' a ++ "," ++ show' b ++ ")"
+instance (GShow a, GShow b) => GShow (a, b) where
+  gshow (a,b) = "(" ++ gshow a ++ "," ++ gshow b ++ ")"
 
 
 -- Generic instances
-instance (Show a) => Show (Maybe a) where show' = show
+instance (GShow a) => GShow (Maybe a) where gshow = gshowDefault
 
 
 -- Utilities

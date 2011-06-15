@@ -56,8 +56,8 @@ instance (GMapKey a, GMapKey b) => GMapKey (a :+: b) where
   insert (R a) v (GMapSum gm1 gm2)  = GMapSum gm1 (insert a v gm2)
 
 -- Uninteresting cases, but necessary
-instance (GMapKey a) => GMapKey (C c a) where
-  data GMap (C c a) v        = GMapCon (GMap a v)
+instance (GMapKey a) => GMapKey (CEq c p q a) where
+  data GMap (CEq c p q a) v  = GMapCon (GMap a v)
   empty                      = GMapCon empty
   lookup (C c) (GMapCon m)   = lookup c m
   insert (C c) v (GMapCon m) = GMapCon (insert c v m)

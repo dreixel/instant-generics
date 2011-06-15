@@ -2,6 +2,8 @@
 {-# LANGUAGE TypeOperators            #-}
 {-# LANGUAGE FlexibleContexts         #-}
 {-# LANGUAGE OverlappingInstances     #-}
+{-# LANGUAGE FlexibleInstances        #-}
+{-# LANGUAGE GADTs                    #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -38,7 +40,7 @@ instance (HasRec a, Empty a, Empty b) => Empty (a :+: b) where
 instance (Empty a, Empty b) => Empty (a :*: b) where
   empty' = empty' :*: empty'
   
-instance (Empty a) => Empty (C c a) where
+instance (Empty a) => Empty (CEq c p p a) where
   empty' = C empty'
 
 instance (Empty a) => Empty (Var a) where
@@ -96,7 +98,7 @@ instance (HasRec a, HasRec b) => HasRec (a :+: b) where
   hasRec' (L x) = hasRec' x
   hasRec' (R x) = hasRec' x
 
-instance (HasRec a) => HasRec (C c a) where
+instance (HasRec a) => HasRec (CEq c p q a) where
   hasRec' (C x) = hasRec' x
   
 instance HasRec (Rec a) where

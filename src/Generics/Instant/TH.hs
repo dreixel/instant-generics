@@ -4,7 +4,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Generics.Instant.TH
--- Copyright   :  (c) 2010 Universiteit Utrecht
+-- Copyright   :  (c) 2011 Universiteit Utrecht
 -- License     :  BSD3
 --
 -- Maintainer  :  generics@haskell.org
@@ -27,32 +27,141 @@ module Generics.Instant.TH (
     , deriveRep
 
     -- * Utilities
-    , simplInstance
+    , simplInstance, gadtInstance
     , genRepName, typeVariables, tyVarBndrToName
   ) where
 
 import Generics.Instant.Base
+import Generics.SYB (everywhere, mkT, everything, mkQ, gshow)
 
 import Language.Haskell.TH hiding (Fixity())
-import Language.Haskell.TH.Syntax (Lift(..))
+import Language.Haskell.TH.Syntax (Lift(..), showName)
 
-import Data.List (intercalate)
+import Data.List (intercalate, nub, elemIndex)
+import qualified Data.Map as M
 import Control.Monad
+import Control.Arrow ((&&&))
 import Debug.Trace
 
+-- Used by gadtInstance
+data TypeArgsEqs = TypeArgsEqs { args :: [Type]        -- ^ Constructor args
+                               , vars :: [Name]        -- ^ Variables
+                               , teqs :: [(Type,Type)] -- ^ Type equalities
+                               } deriving Show
 
 -- | Given the names of a generic class, a type to instantiate, a function in
 -- the class and the default implementation, generates the code for a basic
 -- generic instance.
 simplInstance :: Name -> Name -> Name -> Name -> Q [Dec]
 simplInstance cl ty fn df = do
-  i  <- reify (genRepName ty)
-  i' <- reify ty
+  i <- reify ty
   let typ = return (foldl (\a -> AppT a . VarT . tyVarBndrToName) 
-                              (ConT ty) (typeVariables i'))
+                              (ConT ty) (typeVariables i))
   fmap (: []) $ instanceD (cxt []) (conT cl `appT` typ)
     [funD fn [clause [] (normalB (varE df)) []]]
 
+-- | Given the names of a generic class, a GADT type to instantiate, a function
+-- in the class and the default implementation, generates the code for a basic
+-- generic instance. This is tricky in general because we have to analyze the
+-- return types of each of the GADT constructors and give instances accordingly.
+gadtInstance :: Name -> Name -> Name -> Name -> Q [Dec]
+gadtInstance cl ty fn df = do
+  i <- reify ty
+  let typ = (foldl (\a -> AppT a . VarT . tyVarBndrToName) 
+                              (ConT ty) (typeVariables i))
+
+      dt :: ([TyVarBndr],[Con])
+      dt = case i of
+             TyConI (DataD _ _ vs cs _) -> (vs, cs)
+             _ -> error ("gadtInstance: " ++ show ty ++ "is not a valid type")
+
+      -- List of index variable names
+      idxs :: [Name]
+      idxs = extractIndices (fst dt) (snd dt)
+
+      -- Get all the arguments, variables, and type equalities introduced by the
+      -- constructors
+      eqs :: [Name] -> [Con] -> [TypeArgsEqs]
+      eqs nms cs = map f cs where
+        f :: Con -> TypeArgsEqs
+        f (NormalC _ tys)    = TypeArgsEqs (map snd tys)             [] []
+        f (RecC _ tys)       = TypeArgsEqs (map (\(_,_,t) -> t) tys) [] []
+        f (InfixC t1 _ t2)   = TypeArgsEqs [snd t1, snd t2]          [] []
+        f (ForallC vs cxt c) = case f c of
+            TypeArgsEqs ts vs' eqs' -> 
+              TypeArgsEqs ts (tyVarBndrsToNames vs ++ vs') 
+                          ((concatMap g cxt) ++ eqs')
+        g :: Pred -> [(Type,Type)]
+        g (EqualP (VarT t1) t2) | t1 `elem` nms = [(VarT t1,t2)]
+                                | otherwise     = []
+        g _                                     = []
+
+      subst :: [(Type,Type)] -> Type -> Type
+      subst s = everywhere (mkT f) where
+        f (VarT a) = case lookup (VarT a) s of
+                       Nothing -> VarT a
+                       Just t  -> t
+        f x        = x
+
+      mkInst :: TypeArgsEqs -> Dec
+      mkInst t = InstanceD (map mkCxt (args t)) 
+                           (ConT cl `AppT` subst (teqs t) typ) instBody
+
+      mkCxt :: Type -> Pred
+      mkCxt = ClassP cl . (:[])
+
+      -- The instance body is empty for regular cases
+      instBody :: [Dec]
+      instBody = [FunD fn [Clause [] (NormalB (VarE df)) []]]
+
+      update :: TypeArgsEqs -> [TypeArgsEqs] -> [TypeArgsEqs]
+      -- update True  t1 [] = [t1]
+      update _  [] = []
+      update t1 (t2:ts) | teqs t1 == teqs t2 = 
+                            t2 {args = nub (args t1 ++ args t2)} : ts
+                        | otherwise          = t2 : update t1 ts
+
+      -- Types without any type equalities (not real GADTs) need to be handled
+      -- differently. Others are dealt with using filterMerge.
+      handleADTs :: ([TypeArgsEqs] -> [TypeArgsEqs]) 
+                 -> [TypeArgsEqs] -> [TypeArgsEqs]
+      handleADTs f ts | and (map (null . teqs) ts) 
+                      = [TypeArgsEqs (concatMap args ts) [] []]
+                      | otherwise = f ts                      
+
+      -- We need to
+      -- 1) ignore constructors that don't introduce any type equalities
+      -- 2) merge constructors with the same return type
+      -- This code is terribly inefficient and could easily be improved, btw.
+      filterMerge :: [TypeArgsEqs] -> [TypeArgsEqs]
+      filterMerge (t0@(TypeArgsEqs ts vs eqs):t)
+        | eqs == [] = update t0 (filterMerge t)
+        | otherwise = case filterMerge t of
+                        l -> if or (concat 
+                                  [ [ typeMatch vs (vars t2) eq1 eq2
+                                    | eq1 <- eqs, eq2 <- teqs t2 ] | t2 <- l ])
+                             then update t0 l
+                             else t0 : l
+      filterMerge [] = []
+
+      -- For (2) above, we need to consider type equality modulo
+      -- quantified-variable names
+      typeMatch :: [Name] -> [Name] -> (Type,Type) -> (Type,Type) -> Bool
+      typeMatch vs1 vs2 eq1 eq2 | length vs1 /= length vs2 = False 
+                                | otherwise 
+                                = eq1 == everywhere (mkT f) eq2
+        where f (VarT n) = case n `elemIndex` vs2 of
+                             -- is not a quantified variable
+                             Nothing -> VarT n
+                             -- it is, replace it with the equivalent var
+                             Just i  -> VarT (vs1 !! i)
+              f x        = x
+
+      allTypeArgsEqs = eqs idxs (snd dt)
+    
+      normInsts = map mkInst   (handleADTs filterMerge allTypeArgsEqs)
+
+  return $ normInsts
 
 
 -- | Given the type and the name (as string) for the type to derive,
@@ -81,20 +190,28 @@ deriveRepresentable n = do
 deriveRep :: Name -> Q [Dec]
 deriveRep n = do
   i <- reify n
-  fmap (:[]) $ tySynD (genRepName n) (typeVariables i) (repType n)
+
+  let d = case i of
+            TyConI dec -> dec
+            _ -> error "unknown construct"
+  
+  exTyFamsInsts <- genExTyFamInsts d
+  fmap (: exTyFamsInsts) $ 
+    tySynD (genRepName n) (typeVariables i) (repType d (typeVariables i))
 
 deriveInst :: Name -> Q [Dec]
 deriveInst t = do
   i <- reify t
   let typ q = return $ foldl (\a -> AppT a . VarT . tyVarBndrToName) (ConT q) 
                 (typeVariables i)
+      inlPrg = pragInlD t (inlineSpecPhase True False True 1)
   fcs <- mkFrom t 1 0 t
   tcs <- mkTo   t 1 0 t
   liftM (:[]) $
     instanceD (cxt [])
       (conT ''Representable `appT` typ t)
         [ tySynInstD ''Rep [typ t] (typ (genRepName t))
-        , funD 'from fcs, funD 'to tcs]
+        , {- inlPrg, -} funD 'from fcs, funD 'to tcs]
 
 constrInstance :: Name -> Q [Dec]
 constrInstance n = do
@@ -113,6 +230,9 @@ typeVariables :: Info -> [TyVarBndr]
 typeVariables (TyConI (DataD    _ _ tv _ _)) = tv
 typeVariables (TyConI (NewtypeD _ _ tv _ _)) = tv
 typeVariables _                           = []
+
+tyVarBndrsToNames :: [TyVarBndr] -> [Name]
+tyVarBndrsToNames = map tyVarBndrToName
 
 tyVarBndrToName :: TyVarBndr -> Name
 tyVarBndrToName (PlainTV  name)   = name
@@ -174,43 +294,140 @@ mkConstrInstanceWith dt n extra =
   instanceD (cxt []) (appT (conT ''Constructor) (conT $ genName [dt, n]))
     (funD 'conName [clause [wildP] (normalB (stringE (nameBase n))) []] : extra)
 
-repType :: Name -> Q Type
-repType n =
-    do
-      -- runIO $ putStrLn $ "processing " ++ show n
-      i <- reify n
-      let b = case i of
-                TyConI (DataD _ dt vs cs _) ->
-                  (foldBal' sum (error "Empty datatypes are not supported.")
-                    (map (repCon (dt, map tyVarBndrToName vs)) cs))
-                TyConI (NewtypeD _ dt vs c _) ->
-                  repCon (dt, map tyVarBndrToName vs) c
-                TyConI (TySynD t _ _) -> error "type synonym?" 
-                _ -> error "unknown construct" 
-      --appT b (conT $ mkName (nameBase n))
-      b where
-    sum :: Q Type -> Q Type -> Q Type
-    sum a b = conT ''(:+:) `appT` a `appT` b
+repType :: Dec -> [TyVarBndr] -> Q Type
+repType i repVs = 
+  do let sum :: Q Type -> Q Type -> Q Type
+         sum a b = conT ''(:+:) `appT` a `appT` b
+     case i of
+        (DataD _ dt vs cs _)   ->
+          (foldBal' sum (error "Empty datatypes are not supported.")
+            (map (repConGADT (dt, tyVarBndrsToNames vs) repVs 
+                   (extractIndices vs cs)) cs))
+        (NewtypeD _ dt vs c _) -> repConGADT (dt, tyVarBndrsToNames vs) repVs
+                                   (extractIndices vs [c]) c
+        (TySynD t _ _)         -> error "type synonym?" 
+        _                      -> error "unknown construct"
 
 
-repCon :: (Name, [Name]) -> Con -> Q Type
--- Contexts are ignored
-repCon d (ForallC _ _ c) = repCon d c
-repCon (dt, vs) (NormalC n []) =
-    conT ''C `appT` (conT $ genName [dt, n]) `appT` conT ''U
-repCon (dt, vs) (NormalC n fs) =
-    conT ''C `appT` (conT $ genName [dt, n]) `appT` 
+-- Given a datatype declaration, returns a list of its type variables which are
+-- used as index and not as data
+extractIndices :: [TyVarBndr] -> [Con] -> [Name]
+extractIndices vs = nub . everything (++) ([] `mkQ` isIndexEq) where
+  isIndexEq :: Pred -> [Name]
+  isIndexEq (EqualP (VarT a) (VarT b)) = if a `elem` tyVarBndrsToNames vs
+                                         then (a:)
+                                           (if b `elem` tyVarBndrsToNames vs
+                                           then [b] else []) else []
+  isIndexEq (EqualP (VarT a) _)        = if a `elem` tyVarBndrsToNames vs
+                                         then [a] else []
+  isIndexEq (EqualP _ (VarT a))        = if a `elem` tyVarBndrsToNames vs
+                                         then [a] else []
+  isIndexEq _                          = []
+
+repConGADT :: (Name, [Name]) -> [TyVarBndr] -> [Name] -> Con -> Q Type
+-- We only accept one index variable, for now
+repConGADT _ _ vs@(_:_:_) (ForallC _ _ _) = 
+  error ("Datatype indexed over >1 variable: " ++ show vs)
+-- Handle type equality constraints
+repConGADT d@(dt, dtVs) repVs [indexVar] (ForallC vs ctx c) = 
+  do
+     let
+        genTypeEqs ((EqualP t1 t2):r) | otherwise = case genTypeEqs r of 
+            (t1s,t2s) -> ( ConT ''(:*:) `AppT` (substTyVar vsN t1) `AppT` t1s
+                         , ConT ''(:*:) `AppT` (substTyVar vsN t2) `AppT` t2s)
+        genTypeEqs (_:r) = genTypeEqs r -- other constraints are ignored
+        genTypeEqs []    = baseEqs
+
+        substTyVar :: [Name] -> Type -> Type
+        substTyVar ns = everywhere (mkT f) where
+          f (VarT v) = case elemIndex v ns of
+                         Nothing -> VarT v
+                         Just i  -> ConT ''X 
+                                     `AppT` ConT (genName [dt,getConName c])
+                                     `AppT` int2TLNat i
+                                     `AppT` VarT indexVar
+          f x        = x
+
+        vsN :: [Name]
+        vsN = tyVarBndrsToNames vs
+
+     -- Go on with generating the representation type, taking the equalities
+     repCon (dt, dtVs) (everywhere (mkT (substTyVar vsN)) c) (genTypeEqs ctx)
+-- No constraints, go on as usual
+repConGADT d _repVs _ c = repCon d c baseEqs
+
+-- Extract the constructor name
+getConName :: Con -> Name
+getConName (NormalC n _)   = n
+getConName (RecC n _)      = n
+getConName (InfixC _ n _)  = n
+getConName (ForallC _ _ c) = getConName c
+
+-- Generate a type-level natural from an Int
+int2TLNat :: Int -> Type
+int2TLNat 0 = ConT ''Ze
+int2TLNat n = ConT ''Su `AppT` int2TLNat (n-1)
+
+-- Generate the mobility rules for the existential type families
+genExTyFamInsts :: Dec -> Q [Dec]
+genExTyFamInsts (DataD    _ n _ cs _) = fmap concat $ 
+                                          mapM (genExTyFamInsts' n) cs
+genExTyFamInsts (NewtypeD _ n _ c  _) = genExTyFamInsts' n c
+
+genExTyFamInsts' :: Name -> Con -> Q [Dec]
+genExTyFamInsts' dt (ForallC vs cxt c) = 
+  do let mR = mobilityRules (tyVarBndrsToNames vs) cxt
+         conName = ConT (genName [dt,getConName c])
+         tySynInst ty n x = TySynInstD ''X [conName, int2TLNat n, ty] x
+     return [ tySynInst ty n (VarT nm) | (n,(nm, ty)) <- zip [0..] mR ]
+genExTyFamInsts' _ _ = return []
+
+-- Compute the shape of the mobility rules
+mobilityRules :: [Name] -> Cxt -> [(Name,Type)]
+mobilityRules [] _   = []
+mobilityRules vs cxt = concat [ mobilityRules' v p | v <- vs, p <- cxt ] where
+  mobilityRules' :: Name -> Pred -> [(Name,Type)]
+  mobilityRules' _ (EqualP (VarT _) (VarT _)) = []
+  mobilityRules' v (EqualP (VarT a) x) | v `inComplex` x = [(v,x)]
+                                       | otherwise       = []
+  mobilityRules' v (EqualP x (VarT a)) = mobilityRules' v (EqualP (VarT a) x)
+  mobilityRules' v _                   = []
+
+  inComplex :: Name -> Type -> Bool
+  inComplex v (VarT _) = False
+  inComplex v x = everything (||) (False `mkQ` q) x where
+    q (VarT x) | x == v    = True
+    q (VarT x) | otherwise = False
+    q _                    = False
+
+flattenEqs :: (Type, Type) -> Q Type
+flattenEqs (t1, t2) = return t1 `appT` return t2
+
+-- () ~ ()
+baseEqs :: (Type, Type)
+baseEqs = (TupleT 0, TupleT 0)
+
+repCon :: (Name, [Name]) -> Con -> (Type,Type) -> Q Type
+repCon _ (ForallC _ _ _) _ = error "impossible"
+repCon (dt, vs) (NormalC n []) (t1,t2) =
+    conT ''CEq `appT` (conT $ genName [dt, n]) `appT` return t1 
+                                               `appT` return t2 `appT` conT ''U
+repCon (dt, vs) (NormalC n fs) (t1,t2) =
+    conT ''CEq `appT` (conT $ genName [dt, n]) `appT` return t1 
+                                               `appT` return t2 `appT` 
      (foldBal prod (map (repField (dt, vs) . snd) fs)) where
     prod :: Q Type -> Q Type -> Q Type
     prod a b = conT ''(:*:) `appT` a `appT` b
-repCon (dt, vs) r@(RecC n []) =
-    conT ''C `appT` (conT $ genName [dt, n]) `appT` conT ''U
-repCon (dt, vs) r@(RecC n fs) =
-    conT ''C `appT` (conT $ genName [dt, n]) `appT` 
+repCon (dt, vs) r@(RecC n []) (t1,t2)  =
+    conT ''CEq `appT` (conT $ genName [dt, n]) `appT` return t1
+                                               `appT` return t2 `appT` conT ''U
+repCon (dt, vs) r@(RecC n fs) (t1,t2) =
+    conT ''CEq `appT` (conT $ genName [dt, n]) `appT` return t1 
+                                               `appT` return t2 `appT` 
       (foldBal prod (map (repField' (dt, vs) n) fs)) where
     prod :: Q Type -> Q Type -> Q Type
     prod a b = conT ''(:*:) `appT` a `appT` b
-repCon d (InfixC t1 n t2) = repCon d (NormalC n [t1,t2])
+repCon d (InfixC t1 n t2) eqs = repCon d (NormalC n [t1,t2]) eqs
 
 --dataDeclToType :: (Name, [Name]) -> Type
 --dataDeclToType (dt, vs) = foldl (\a b -> AppT a (VarT b)) (ConT dt) vs
