@@ -1,7 +1,7 @@
 category:               Generics
 copyright:              (c) 2011 Universiteit Utrecht
 name:                   instant-generics
-version:                0.3
+version:                0.3.1
 license:                BSD3
 license-file:           LICENSE
 author:                 José Pedro Magalhães
@@ -12,14 +12,12 @@ description:
   This is a generic programming library based on type classes and type families
   first described by Chakravarty et al. (see 
   <http://www.cse.unsw.edu.au/~chak/project/generics/>). The current release
-  is a simplified version mostly to support the rewriting library described 
-  in the paper:
+  implements the extensions to support indexed datatypes described in:
   .
-  *  Thomas van Noort, Alexey Rodriguez Yakushev, Stefan Holdermans, 
-     Johan Jeuring, Bastiaan Heeren, José Pedro Magalhães.
-     /A Lightweight Approach to Datatype-Generic Rewriting./
-     Journal of Functional Programming, Special Issue on Generic Programming, 
-     2010.
+  *  José Pedro Magalhães and Johan Jeuring.
+     /Generic Programming for Indexed Datatypes./
+     Draft version, 2011.
+     <http://dreixel.net/research/pdf/gpid_draft.pdf>
 
 stability:              experimental
 build-type:             Simple
