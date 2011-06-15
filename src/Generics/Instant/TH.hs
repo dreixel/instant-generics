@@ -19,7 +19,7 @@
 -- Adapted from Generics.Deriving.TH
 module Generics.Instant.TH (
     -- * Main generator
-      deriveAll
+      deriveAll, deriveAllL
 
     -- * Individual generators
     , deriveConstructors
@@ -170,6 +170,10 @@ deriveAll n =
   do a <- deriveConstructors n
      b <- deriveRepresentable n
      return (a ++ b)
+
+-- | Same as 'deriveAll', but taking a list as input.
+deriveAllL :: [Name] -> Q [Dec]
+deriveAllL = fmap concat . mapM deriveAll
 
 -- | Given a datatype name, derive datatypes and 
 -- instances of class 'Constructor'.
