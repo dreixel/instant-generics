@@ -41,7 +41,6 @@ import Data.List (intercalate, nub, elemIndex)
 import qualified Data.Map as M
 import Control.Monad
 import Control.Arrow ((&&&))
-import Debug.Trace
 
 -- Used by gadtInstance
 data TypeArgsEqs = TypeArgsEqs { args :: [Type]        -- ^ Constructor args
