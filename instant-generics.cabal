@@ -1,7 +1,7 @@
 category:               Generics
 copyright:              (c) 2011 Universiteit Utrecht
 name:                   instant-generics
-version:                0.3.2
+version:                0.3.3
 license:                BSD3
 license-file:           LICENSE
 author:                 José Pedro Magalhães
@@ -29,7 +29,7 @@ extra-source-files:     examples/GMapAssoc.hs
 
 library
   hs-source-dirs:         src
-  build-depends:          base >= 3.0 && < 5, template-haskell >=2.4 && <2.6,
+  build-depends:          base >= 3.0 && < 5, template-haskell >=2.4 && <2.7,
                           containers < 0.5, syb < 0.4
   exposed-modules:        Generics.Instant,
                           Generics.Instant.Base,

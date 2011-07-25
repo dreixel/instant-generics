@@ -68,7 +68,6 @@ type C c a = CEq c () () a
 -- | Class for datatypes that represent data constructors.
 -- For non-symbolic constructors, only 'conName' has to be defined.
 class Constructor c where
-  {-# INLINE conName #-}
   conName   :: t c p q a -> String
   {-# INLINE conFixity #-}
   conFixity :: t c p q a -> Fixity
@@ -89,9 +88,7 @@ data Associativity = LeftAssociative | RightAssociative | NotAssociative
 
 class Representable a where
   type Rep a
-  {-# INLINE [1] to #-}
   to   :: Rep a -> a
-  {-# INLINE [1] from #-}
   from :: a -> Rep a
   -- defaults
   {-
