@@ -1,7 +1,7 @@
 category:               Generics
 copyright:              (c) 2011 Universiteit Utrecht
 name:                   instant-generics
-version:                0.3.3
+version:                0.3.4
 license:                BSD3
 license-file:           LICENSE
 author:                 José Pedro Magalhães
@@ -22,14 +22,18 @@ description:
 stability:              experimental
 build-type:             Simple
 homepage:               http://www.cs.uu.nl/wiki/GenericProgramming/InstantGenerics
-cabal-version:          >= 1.2.3
+cabal-version:          >= 1.6
 tested-with:            GHC == 6.8.3, GHC == 6.10.4, GHC == 6.12.1, GHC == 7.0.2
 extra-source-files:     examples/GMapAssoc.hs
                         examples/Test.hs
 
+source-repository head
+  type: svn
+  location: https://subversion.cs.uu.nl/repos/project.dgp-haskell.libraries/Instant/trunk/
+
 library
   hs-source-dirs:         src
-  build-depends:          base >= 3.0 && < 5, template-haskell >=2.4 && <2.7,
+  build-depends:          base >= 3.0 && < 5, template-haskell >= 2.4 && < 3,
                           containers < 0.5, syb < 0.4
   exposed-modules:        Generics.Instant,
                           Generics.Instant.Base,
