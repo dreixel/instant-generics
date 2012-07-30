@@ -1,7 +1,7 @@
 category:               Generics
-copyright:              (c) 2011 Universiteit Utrecht
+copyright:              (c) 2011 Universiteit Utrecht, 2012 University of Oxford
 name:                   instant-generics
-version:                0.3.4
+version:                0.3.5
 license:                BSD3
 license-file:           LICENSE
 author:                 José Pedro Magalhães
@@ -28,8 +28,8 @@ extra-source-files:     examples/GMapAssoc.hs
                         examples/Test.hs
 
 source-repository head
-  type: svn
-  location: https://subversion.cs.uu.nl/repos/project.dgp-haskell.libraries/Instant/trunk/
+  type: git
+  location: https://github.com/dreixel/instant-generics
 
 library
   hs-source-dirs:         src
