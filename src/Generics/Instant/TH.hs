@@ -207,7 +207,7 @@ deriveInst t = do
   i <- reify t
   let typ q = return $ foldl (\a -> AppT a . VarT . tyVarBndrToName) (ConT q) 
                 (typeVariables i)
-      inlPrg = pragInlD t (inlineSpecPhase True False True 1)
+      -- inlPrg = pragInlD t (inlineSpecPhase True False True 1)
   fcs <- mkFrom t 1 0 t
   tcs <- mkTo   t 1 0 t
   liftM (:[]) $
