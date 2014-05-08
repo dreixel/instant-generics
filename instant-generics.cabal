@@ -1,7 +1,7 @@
 category:               Generics
 copyright:              (c) 2011 Universiteit Utrecht, 2012 University of Oxford
 name:                   instant-generics
-version:                0.3.7
+version:                0.4
 license:                BSD3
 license-file:           LICENSE
 author:                 José Pedro Magalhães

@@ -4,6 +4,7 @@
 {-# LANGUAGE OverlappingInstances     #-}
 {-# LANGUAGE FlexibleInstances        #-}
 {-# LANGUAGE GADTs                    #-}
+{-# LANGUAGE PolyKinds                #-}
 
 -----------------------------------------------------------------------------
 -- |

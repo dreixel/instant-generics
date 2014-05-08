@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts         #-}
 {-# LANGUAGE OverlappingInstances     #-}
 {-# LANGUAGE GADTs                    #-}
+{-# LANGUAGE PolyKinds                #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -31,24 +32,23 @@ class GShow' a where
 
 instance GShow' U where
   gshow' U = ""
-  
+
 instance (GShow' a, GShow' b) => GShow' (a :+: b) where
   gshow' (L x) = gshow' x
   gshow' (R x) = gshow' x
-  
+
 instance (GShow' a, GShow' b) => GShow' (a :*: b) where
   gshow' (a :*: b) = gshow' a `space` gshow' b
-  
+
 instance (GShow' a, Constructor c) => GShow' (CEq c p q a) where
   gshow' c@(C a) | gshow' a == "" = paren $ conName c
-                | otherwise     = paren $ (conName c) `space` gshow' a
+                 | otherwise      = paren $ (conName c) `space` gshow' a
 
 instance GShow a => GShow' (Var a) where
   gshow' (Var x) = gshow x
 
 instance GShow a => GShow' (Rec a) where
   gshow' (Rec x) = gshow x
-
 
 class GShow a where
   gshow :: a -> String

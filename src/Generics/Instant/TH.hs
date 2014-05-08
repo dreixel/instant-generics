@@ -336,8 +336,8 @@ repConGADT d@(dt, dtVs) repVs [indexVar] (ForallC vs ctx c) =
   do
      let
         genTypeEqs ((EqualP t1 t2):r) | otherwise = case genTypeEqs r of 
-            (t1s,t2s) -> ( ConT ''(:*:) `AppT` (substTyVar vsN t1) `AppT` t1s
-                         , ConT ''(:*:) `AppT` (substTyVar vsN t2) `AppT` t2s)
+            (t1s,t2s) -> ( ConT '(,) `AppT` (substTyVar vsN t1) `AppT` t1s
+                         , ConT '(,) `AppT` (substTyVar vsN t2) `AppT` t2s)
         genTypeEqs (_:r) = genTypeEqs r -- other constraints are ignored
         genTypeEqs []    = baseEqs
 
@@ -368,8 +368,8 @@ getConName (ForallC _ _ c) = getConName c
 
 -- Generate a type-level natural from an Int
 int2TLNat :: Int -> Type
-int2TLNat 0 = ConT ''Ze
-int2TLNat n = ConT ''Su `AppT` int2TLNat (n-1)
+int2TLNat 0 = ConT 'Ze
+int2TLNat n = ConT 'Su `AppT` int2TLNat (n-1)
 
 -- Generate the mobility rules for the existential type families
 genExTyFamInsts :: Dec -> Q [Dec]

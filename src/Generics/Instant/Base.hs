@@ -4,6 +4,8 @@
 {-# LANGUAGE GADTs                    #-}
 {-# LANGUAGE FlexibleInstances        #-}
 {-# LANGUAGE EmptyDataDecls           #-}
+{-# LANGUAGE DataKinds                #-}
+{-# LANGUAGE PolyKinds                #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -45,7 +47,7 @@ module Generics.Instant.Base (
       Z, U(..), (:+:)(..), (:*:)(..), CEq(..), C, Var(..), Rec(..)
     , Constructor(..), Fixity(..), Associativity(..)
     , Representable(..)
-    , X, Ze, Su
+    , X, Nat(..)
   ) where
 
 infixr 5 :+:
@@ -98,8 +100,7 @@ class Representable a where
   -}
 
 -- Type family for representing existentially-quantified variables
-type family X c n a
+type family X c (n :: Nat) (a :: k1) :: k2
 
--- Type-level natural numbers
-data Ze :: *
-data Su :: * -> *
+-- Natural numbers, to be used at the type level
+data Nat = Ze | Su Nat
