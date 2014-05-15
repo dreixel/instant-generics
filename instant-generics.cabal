@@ -41,5 +41,6 @@ library
                           Generics.Instant.Functions,
                           Generics.Instant.Functions.Show,
                           Generics.Instant.Functions.Empty,
+                          Generics.Instant.Functions.Enum,
                           Generics.Instant.Functions.Eq
   ghc-options:            -Wall
