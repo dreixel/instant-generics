@@ -213,7 +213,12 @@ deriveInst t = do
   liftM (:[]) $
     instanceD (cxt [])
       (conT ''Representable `appT` typ t)
-        [ tySynInstD ''Rep [typ t] (typ (genRepName t))
+        [
+#if __GLASGOW_HASKELL__ >= 707
+          tySynInstD ''Rep (tySynEqn [typ t] (typ (genRepName t)))
+#else
+          tySynInstD ''Rep [typ t] (typ (genRepName t))
+#endif
         , {- inlPrg, -} funD 'from fcs, funD 'to tcs]
 
 constrInstance :: Name -> Q [Dec]
@@ -381,7 +386,11 @@ genExTyFamInsts' :: Name -> Con -> Q [Dec]
 genExTyFamInsts' dt (ForallC vs cxt c) = 
   do let mR = mobilityRules (tyVarBndrsToNames vs) cxt
          conName = ConT (genName [dt,getConName c])
+#if __GLASGOW_HASKELL__ >= 707
+         tySynInst ty n x = TySynInstD ''X (TySynEqn [conName, int2TLNat n, ty] x)
+#else
          tySynInst ty n x = TySynInstD ''X [conName, int2TLNat n, ty] x
+#endif
      return [ tySynInst ty n (VarT nm) | (n,(nm, ty)) <- zip [0..] mR ]
 genExTyFamInsts' _ _ = return []
 
