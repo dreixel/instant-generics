@@ -8,6 +8,7 @@
 {-# LANGUAGE OverlappingInstances       #-}
 {-# LANGUAGE UndecidableInstances       #-}
 {-# LANGUAGE GADTs                      #-}
+{-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE ExistentialQuantification  #-}
 {-# LANGUAGE StandaloneDeriving         #-}
 
