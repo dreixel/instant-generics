@@ -1,16 +1,16 @@
 category:               Generics
 copyright:              (c) 2011 Universiteit Utrecht, 2012 University of Oxford
 name:                   instant-generics
-version:                0.4.1
+version:                0.5
 license:                BSD3
 license-file:           LICENSE
 author:                 José Pedro Magalhães
 maintainer:             generics@haskell.org
 synopsis:               Generic programming library with a sum of products view
-description:               
+description:
 
   This is a generic programming library based on type classes and type families
-  first described by Chakravarty et al. (see 
+  first described by Chakravarty et al. (see
   <http://www.cse.unsw.edu.au/~chak/project/generics/>). The current release
   implements the extensions to support indexed datatypes described in:
   .
@@ -32,7 +32,7 @@ source-repository head
 
 library
   hs-source-dirs:         src
-  build-depends:          base >= 4.6 && < 5, template-haskell >= 2.4 && < 3,
+  build-depends:          base >= 3.0 && < 5, template-haskell >= 2.4 && < 3,
                           containers < 1.0, syb < 1.0
   exposed-modules:        Generics.Instant,
                           Generics.Instant.Base,
