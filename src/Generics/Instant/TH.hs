@@ -372,8 +372,8 @@ repConGADT d@(dt, dtVs) repVs [indexVar] (ForallC vs ctx c) =
           ((EqualP t1 t2):r)
 #endif
             -> let (t1s,t2s) = genTypeEqs r
-               in  ( ConT '(,) `AppT` (substTyVar vsN t1) `AppT` t1s
-                   , ConT '(,) `AppT` (substTyVar vsN t2) `AppT` t2s)
+               in  ( TupleT 2 `AppT` (substTyVar vsN t1) `AppT` t1s
+                   , TupleT 2 `AppT` (substTyVar vsN t2) `AppT` t2s)
           (_:r) -> genTypeEqs r -- other constraints are ignored
           [] -> baseEqs
 
