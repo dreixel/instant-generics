@@ -71,7 +71,11 @@ gadtInstance cl ty fn df = do
 
       dt :: ([TyVarBndr],[Con])
       dt = case i of
+#if MIN_VERSION_template_haskell(2,11,0)
+             TyConI (DataD _ _ vs _ cs _) -> (vs, cs)
+#else
              TyConI (DataD _ _ vs cs _) -> (vs, cs)
+#endif
              _ -> error ("gadtInstance: " ++ show ty ++ "is not a valid type")
 
       -- List of index variable names
@@ -108,8 +112,13 @@ gadtInstance cl ty fn df = do
         f x        = x
 
       mkInst :: TypeArgsEqs -> Dec
+#if MIN_VERSION_template_haskell(2,11,0)
+      mkInst t = InstanceD Nothing (map mkCxt (args t))
+                           (ConT cl `AppT` subst (teqs t) typ) instBody
+#else
       mkInst t = InstanceD (map mkCxt (args t))
                            (ConT cl `AppT` subst (teqs t) typ) instBody
+#endif
 
       mkCxt :: Type -> Pred
       mkCxt =
@@ -235,8 +244,13 @@ constrInstance :: Name -> Q [Dec]
 constrInstance n = do
   i <- reify n
   case i of
-    TyConI (DataD    _ n _ cs _) -> mkInstance n cs
-    TyConI (NewtypeD _ n _ c  _) -> mkInstance n [c]
+#if MIN_VERSION_template_haskell(2,11,0)
+    TyConI (DataD    _ n _ _ cs _) -> mkInstance n cs
+    TyConI (NewtypeD _ n _ _ c  _) -> mkInstance n [c]
+#else
+    TyConI (DataD    _ n _ cs _)   -> mkInstance n cs
+    TyConI (NewtypeD _ n _ c  _)   -> mkInstance n [c]
+#endif
     _ -> return []
   where
     mkInstance n cs = do
@@ -245,8 +259,13 @@ constrInstance n = do
       return $ ds ++ is
 
 typeVariables :: Info -> [TyVarBndr]
+#if MIN_VERSION_template_haskell(2,11,0)
+typeVariables (TyConI (DataD    _ _ tv _ _ _)) = tv
+typeVariables (TyConI (NewtypeD _ _ tv _ _ _)) = tv
+#else
 typeVariables (TyConI (DataD    _ _ tv _ _)) = tv
 typeVariables (TyConI (NewtypeD _ _ tv _ _)) = tv
+#endif
 typeVariables _                           = []
 
 tyVarBndrsToNames :: [TyVarBndr] -> [Name]
@@ -269,7 +288,11 @@ genRepName = mkName . (++"_") . ("Rep"  ++) . nameBase
 
 mkConstrData :: Name -> Con -> Q Dec
 mkConstrData dt (NormalC n _) =
+#if MIN_VERSION_template_haskell(2,11,0)
+  dataD (cxt []) (genName [dt, n]) [] Nothing [] (cxt [])
+#else
   dataD (cxt []) (genName [dt, n]) [] [] []
+#endif
 mkConstrData dt r@(RecC _ _) =
   mkConstrData dt (stripRecordNames r)
 mkConstrData dt (InfixC t1 n t2) =
@@ -293,11 +316,19 @@ mkConstrInstance dt (NormalC n _) = mkConstrInstanceWith dt n []
 mkConstrInstance dt (RecC    n _) = mkConstrInstanceWith dt n
       [ funD 'conIsRecord [clause [wildP] (normalB (conE 'True)) []]]
 mkConstrInstance dt (InfixC t1 n t2) =
+#if MIN_VERSION_template_haskell(2,11,0)
     do
-      i <- reify n
-      let fi = case i of
-                 DataConI _ _ _ f -> convertFixity f
-                 _ -> Prefix
+      rf <- reifyFixity n
+      let fi = case rf of
+                 Just f  -> convertFixity f
+                 Nothing -> Prefix
+#else
+  do
+    i <- reify n
+    let fi = case i of
+               DataConI _ _ _ f -> convertFixity f
+               _ -> Prefix
+#endif
       instanceD (cxt []) (appT (conT ''Constructor) (conT $ genName [dt, n]))
         [funD 'conName   [clause [wildP] (normalB (stringE (nameBase n))) []],
          funD 'conFixity [clause [wildP] (normalB [| fi |]) []]]
@@ -317,12 +348,21 @@ repType i repVs =
   do let sum :: Q Type -> Q Type -> Q Type
          sum a b = conT ''(:+:) `appT` a `appT` b
      case i of
+#if MIN_VERSION_template_haskell(2,11,0)
+        (DataD _ dt vs _ cs _)   ->
+#else
         (DataD _ dt vs cs _)   ->
+#endif
           (foldBal' sum (error "Empty datatypes are not supported.")
             (map (repConGADT (dt, tyVarBndrsToNames vs) repVs
                    (extractIndices vs cs)) cs))
-        (NewtypeD _ dt vs c _) -> repConGADT (dt, tyVarBndrsToNames vs) repVs
-                                   (extractIndices vs [c]) c
+#if MIN_VERSION_template_haskell(2,11,0)
+        (NewtypeD _ dt vs _ c _) -> 
+#else
+        (NewtypeD _ dt vs c _) -> 
+#endif
+          repConGADT (dt, tyVarBndrsToNames vs) repVs
+                     (extractIndices vs [c]) c
         (TySynD t _ _)         -> error "type synonym?"
         _                      -> error "unknown construct"
 
@@ -409,9 +449,13 @@ int2TLNat n = ConT 'Su `AppT` int2TLNat (n-1)
 
 -- Generate the mobility rules for the existential type families
 genExTyFamInsts :: Dec -> Q [Dec]
-genExTyFamInsts (DataD    _ n _ cs _) = fmap concat $
-                                          mapM (genExTyFamInsts' n) cs
+#if MIN_VERSION_template_haskell(2,11,0)
+genExTyFamInsts (DataD    _ n _ _ cs _) = fmap concat $ mapM (genExTyFamInsts' n) cs
+genExTyFamInsts (NewtypeD _ n _ _ c  _) = genExTyFamInsts' n c
+#else
+genExTyFamInsts (DataD    _ n _ cs _) = fmap concat $ mapM (genExTyFamInsts' n) cs
 genExTyFamInsts (NewtypeD _ n _ c  _) = genExTyFamInsts' n c
+#endif
 
 genExTyFamInsts' :: Name -> Con -> Q [Dec]
 genExTyFamInsts' dt (ForallC vs cxt c) =
@@ -511,10 +555,18 @@ mkFrom ns m i n =
       let wrapE e = e -- lrE m i e
       i <- reify n
       let b = case i of
+#if MIN_VERSION_template_haskell(2,11,0)
+                TyConI (DataD _ dt vs _ cs _) ->
+#else
                 TyConI (DataD _ dt vs cs _) ->
+#endif
                   zipWith (fromCon wrapE ns (dt, map tyVarBndrToName vs)
                     (length cs)) [1..] cs
+#if MIN_VERSION_template_haskell(2,11,0)
+                TyConI (NewtypeD _ dt vs _ c _) ->
+#else
                 TyConI (NewtypeD _ dt vs c _) ->
+#endif
                   [fromCon wrapE ns (dt, map tyVarBndrToName vs) 1 0 c]
                 TyConI (TySynD t _ _) -> error "type synonym?"
                   -- [clause [varP (field 0)] (normalB (wrapE $ conE 'K1 `appE` varE (field 0))) []]
@@ -528,10 +580,18 @@ mkTo ns m i n =
       let wrapP p = p -- lrP m i p
       i <- reify n
       let b = case i of
+#if MIN_VERSION_template_haskell(2,11,0)
+                TyConI (DataD _ dt vs _ cs _) ->
+#else
                 TyConI (DataD _ dt vs cs _) ->
+#endif
                   zipWith (toCon wrapP ns (dt, map tyVarBndrToName vs)
                     (length cs)) [1..] cs
+#if MIN_VERSION_template_haskell(2,11,0)
+                TyConI (NewtypeD _ dt vs _ c _) ->
+#else
                 TyConI (NewtypeD _ dt vs c _) ->
+#endif
                   [toCon wrapP ns (dt, map tyVarBndrToName vs) 1 0 c]
                 TyConI (TySynD t _ _) -> error "type synonym?"
                   -- [clause [wrapP $ conP 'K1 [varP (field 0)]] (normalB $ varE (field 0)) []]
