@@ -71,7 +71,11 @@ gadtInstance cl ty fn df = do
 
       dt :: ([TyVarBndr],[Con])
       dt = case i of
+#if MIN_VERSION_template_haskell(2,11,0)
+             TyConI (DataD _ _ vs _ cs _) -> (vs, cs)
+#else
              TyConI (DataD _ _ vs cs _) -> (vs, cs)
+#endif
              _ -> error ("gadtInstance: " ++ show ty ++ "is not a valid type")
 
       -- List of index variable names
@@ -108,8 +112,13 @@ gadtInstance cl ty fn df = do
         f x        = x
 
       mkInst :: TypeArgsEqs -> Dec
+#if MIN_VERSION_template_haskell(2,11,0)
+      mkInst t = InstanceD Nothing (map mkCxt (args t))
+                           (ConT cl `AppT` subst (teqs t) typ) instBody
+#else
       mkInst t = InstanceD (map mkCxt (args t))
                            (ConT cl `AppT` subst (teqs t) typ) instBody
+#endif
 
       mkCxt :: Type -> Pred
       mkCxt =
@@ -235,18 +244,28 @@ constrInstance :: Name -> Q [Dec]
 constrInstance n = do
   i <- reify n
   case i of
-    TyConI (DataD    _ n _ cs _) -> mkInstance n cs
-    TyConI (NewtypeD _ n _ c  _) -> mkInstance n [c]
+#if MIN_VERSION_template_haskell(2,11,0)
+    TyConI (DataD    _ n _ _ cs _) -> mkInstance n cs
+    TyConI (NewtypeD _ n _ _ c  _) -> mkInstance n [c]
+#else
+    TyConI (DataD    _ n _ cs _)   -> mkInstance n cs
+    TyConI (NewtypeD _ n _ c  _)   -> mkInstance n [c]
+#endif
     _ -> return []
   where
     mkInstance n cs = do
-      ds <- mapM (mkConstrData n) cs
-      is <- mapM (mkConstrInstance n) cs
+      ds <- concat <$> mapM (mkConstrData n) cs
+      is <- concat <$> mapM (mkConstrInstance n) cs
       return $ ds ++ is
 
 typeVariables :: Info -> [TyVarBndr]
+#if MIN_VERSION_template_haskell(2,11,0)
+typeVariables (TyConI (DataD    _ _ tv _ _ _)) = tv
+typeVariables (TyConI (NewtypeD _ _ tv _ _ _)) = tv
+#else
 typeVariables (TyConI (DataD    _ _ tv _ _)) = tv
 typeVariables (TyConI (NewtypeD _ _ tv _ _)) = tv
+#endif
 typeVariables _                           = []
 
 tyVarBndrsToNames :: [TyVarBndr] -> [Name]
@@ -267,15 +286,32 @@ genName = mkName . (++"_") . intercalate "_" . map nameBase
 genRepName :: Name -> Name
 genRepName = mkName . (++"_") . ("Rep"  ++) . nameBase
 
-mkConstrData :: Name -> Con -> Q Dec
+mkConstrData :: Name -> Con -> Q [Dec]
 mkConstrData dt (NormalC n _) =
-  dataD (cxt []) (genName [dt, n]) [] [] []
+#if MIN_VERSION_template_haskell(2,12,0)
+  pure <$> dataD (cxt []) (genName [dt, n]) [] Nothing [] []
+#elif MIN_VERSION_template_haskell(2,11,0)
+  pure <$> dataD (cxt []) (genName [dt, n]) [] Nothing [] (cxt [])
+#else
+  pure <$> dataD (cxt []) (genName [dt, n]) [] [] []
+#endif
 mkConstrData dt r@(RecC _ _) =
   mkConstrData dt (stripRecordNames r)
 mkConstrData dt (InfixC t1 n t2) =
   mkConstrData dt (NormalC n [t1,t2])
 -- Contexts are ignored
 mkConstrData dt (ForallC _ _ c) = mkConstrData dt c
+#if MIN_VERSION_template_haskell(2,12,0)
+mkConstrData dt (GadtC ns _ _) =
+  forM ns $ \n -> dataD (cxt []) (genName [dt, n]) [] Nothing [] []
+mkConstrData dt (RecGadtC ns _ _) =
+  forM ns $ \n -> dataD (cxt []) (genName [dt, n]) [] Nothing [] []
+#elif MIN_VERSION_template_haskell(2,11,0)
+mkConstrData dt (GadtC ns _ _) =
+  forM ns $ \n -> dataD (cxt []) (genName [dt, n]) [] Nothing [] (cxt [])
+mkConstrData dt (RecGadtC ns _ _) =
+  forM ns $ \n -> dataD (cxt []) (genName [dt, n]) [] Nothing [] (cxt [])
+#endif
 
 instance Lift Fixity where
   lift Prefix      = conE 'Prefix
@@ -286,19 +322,31 @@ instance Lift Associativity where
   lift RightAssociative = conE 'RightAssociative
   lift NotAssociative   = conE 'NotAssociative
 
-mkConstrInstance :: Name -> Con -> Q Dec
+mkConstrInstance :: Name -> Con -> Q [Dec]
 -- Contexts are ignored
 mkConstrInstance dt (ForallC _ _ c) = mkConstrInstance dt c
-mkConstrInstance dt (NormalC n _) = mkConstrInstanceWith dt n []
-mkConstrInstance dt (RecC    n _) = mkConstrInstanceWith dt n
+mkConstrInstance dt (NormalC n _) = pure <$> mkConstrInstanceWith dt n []
+mkConstrInstance dt (RecC    n _) = pure <$> mkConstrInstanceWith dt n
       [ funD 'conIsRecord [clause [wildP] (normalB (conE 'True)) []]]
+#if MIN_VERSION_template_haskell(2,11,0)
+mkConstrInstance dt (GadtC    ns _ _) = forM ns $ \n -> mkConstrInstanceWith dt n []
+mkConstrInstance dt (RecGadtC ns _ _) = forM ns $ \n -> mkConstrInstanceWith dt n []
+#endif
 mkConstrInstance dt (InfixC t1 n t2) =
+#if MIN_VERSION_template_haskell(2,11,0)
     do
-      i <- reify n
-      let fi = case i of
-                 DataConI _ _ _ f -> convertFixity f
-                 _ -> Prefix
-      instanceD (cxt []) (appT (conT ''Constructor) (conT $ genName [dt, n]))
+      rf <- reifyFixity n
+      let fi = case rf of
+                 Just f  -> convertFixity f
+                 Nothing -> Prefix
+#else
+  do
+    i <- reify n
+    let fi = case i of
+               DataConI _ _ _ f -> convertFixity f
+               _ -> Prefix
+#endif
+      pure <$> instanceD (cxt []) (appT (conT ''Constructor) (conT $ genName [dt, n]))
         [funD 'conName   [clause [wildP] (normalB (stringE (nameBase n))) []],
          funD 'conFixity [clause [wildP] (normalB [| fi |]) []]]
   where
@@ -314,15 +362,24 @@ mkConstrInstanceWith dt n extra =
 
 repType :: Dec -> [TyVarBndr] -> Q Type
 repType i repVs =
-  do let sum :: Q Type -> Q Type -> Q Type
-         sum a b = conT ''(:+:) `appT` a `appT` b
+  do let sum :: Type -> Type -> Type
+         sum a b = ConT ''(:+:) `AppT` a `AppT` b
      case i of
+#if MIN_VERSION_template_haskell(2,11,0)
+        (DataD _ dt vs _ cs _)   ->
+#else
         (DataD _ dt vs cs _)   ->
-          (foldBal' sum (error "Empty datatypes are not supported.")
-            (map (repConGADT (dt, tyVarBndrsToNames vs) repVs
-                   (extractIndices vs cs)) cs))
-        (NewtypeD _ dt vs c _) -> repConGADT (dt, tyVarBndrsToNames vs) repVs
-                                   (extractIndices vs [c]) c
+#endif
+          foldBal' sum (error "Empty datatypes are not supported.")
+            <$> (join <$> (mapM (repConGADT (dt, tyVarBndrsToNames vs) repVs
+                                            (extractIndices vs cs)) cs))
+#if MIN_VERSION_template_haskell(2,11,0)
+        (NewtypeD cx dt vs k c deriv) -> 
+          repType (DataD cx dt vs k [c] deriv) repVs
+#else
+        (NewtypeD cx dt vs c deriv) -> 
+          repType (DataD cx dt vs [c] deriv) repVs
+#endif
         (TySynD t _ _)         -> error "type synonym?"
         _                      -> error "unknown construct"
 
@@ -357,7 +414,7 @@ extractIndices vs = nub . everything (++) ([] `mkQ` isIndexEq) where
        -> if a `elem` tyVarBndrsToNames vs then [a] else []
      _ -> []
 
-repConGADT :: (Name, [Name]) -> [TyVarBndr] -> [Name] -> Con -> Q Type
+repConGADT :: (Name, [Name]) -> [TyVarBndr] -> [Name] -> Con -> Q [Type]
 -- We only accept one index variable, for now
 repConGADT _ _ vs@(_:_:_) (ForallC _ _ _) =
   error ("Datatype indexed over >1 variable: " ++ show vs)
@@ -382,7 +439,7 @@ repConGADT d@(dt, dtVs) repVs [indexVar] (ForallC vs ctx c) =
           f (VarT v) = case elemIndex v ns of
                          Nothing -> VarT v
                          Just i  -> ConT ''X
-                                     `AppT` ConT (genName [dt,getConName c])
+                                     `AppT` ConT (genName (dt:getConName c))
                                      `AppT` int2TLNat i
                                      `AppT` VarT indexVar
           f x        = x
@@ -396,11 +453,15 @@ repConGADT d@(dt, dtVs) repVs [indexVar] (ForallC vs ctx c) =
 repConGADT d _repVs _ c = repCon d c baseEqs
 
 -- Extract the constructor name
-getConName :: Con -> Name
-getConName (NormalC n _)   = n
-getConName (RecC n _)      = n
-getConName (InfixC _ n _)  = n
-getConName (ForallC _ _ c) = getConName c
+getConName :: Con -> [Name]
+getConName (NormalC n _)     = [n]
+getConName (RecC n _)        = [n]
+getConName (InfixC _ n _)    = [n]
+getConName (ForallC _ _ c)   = getConName c
+#if MIN_VERSION_template_haskell(2,11,0)
+getConName (GadtC ns _ _)    = ns
+getConName (RecGadtC ns _ _) = ns
+#endif
 
 -- Generate a type-level natural from an Int
 int2TLNat :: Int -> Type
@@ -409,14 +470,18 @@ int2TLNat n = ConT 'Su `AppT` int2TLNat (n-1)
 
 -- Generate the mobility rules for the existential type families
 genExTyFamInsts :: Dec -> Q [Dec]
-genExTyFamInsts (DataD    _ n _ cs _) = fmap concat $
-                                          mapM (genExTyFamInsts' n) cs
+#if MIN_VERSION_template_haskell(2,11,0)
+genExTyFamInsts (DataD    _ n _ _ cs _) = fmap concat $ mapM (genExTyFamInsts' n) cs
+genExTyFamInsts (NewtypeD _ n _ _ c  _) = genExTyFamInsts' n c
+#else
+genExTyFamInsts (DataD    _ n _ cs _) = fmap concat $ mapM (genExTyFamInsts' n) cs
 genExTyFamInsts (NewtypeD _ n _ c  _) = genExTyFamInsts' n c
+#endif
 
 genExTyFamInsts' :: Name -> Con -> Q [Dec]
 genExTyFamInsts' dt (ForallC vs cxt c) =
   do let mR = mobilityRules (tyVarBndrsToNames vs) cxt
-         conName = ConT (genName [dt,getConName c])
+         conName = ConT (genName (dt:getConName c))
 #if __GLASGOW_HASKELL__ >= 707
          tySynInst ty n x = TySynInstD ''X (TySynEqn [conName, int2TLNat n, ty] x)
 #else
@@ -469,27 +534,35 @@ flattenEqs (t1, t2) = return t1 `appT` return t2
 baseEqs :: (Type, Type)
 baseEqs = (TupleT 0, TupleT 0)
 
-repCon :: (Name, [Name]) -> Con -> (Type,Type) -> Q Type
-repCon _ (ForallC _ _ _) _ = error "impossible"
-repCon (dt, vs) (NormalC n []) (t1,t2) =
+repCon :: (Name, [Name]) -> Con -> (Type,Type) -> Q [Type]
+repCon (dt, vs) (ForallC tyvs cxt c) (t1,t2) =
+  -- error "impossible"
+  map (ForallT tyvs cxt) <$> repCon (dt, vs) c (t1,t2)
+repCon (dt, vs) (NormalC n []) (t1,t2) = pure <$>
     conT ''CEq `appT` (conT $ genName [dt, n]) `appT` return t1
                                                `appT` return t2 `appT` conT ''U
-repCon (dt, vs) (NormalC n fs) (t1,t2) =
+repCon (dt, vs) (NormalC n fs) (t1,t2) = pure <$>
     conT ''CEq `appT` (conT $ genName [dt, n]) `appT` return t1
                                                `appT` return t2 `appT`
      (foldBal prod (map (repField (dt, vs) . snd) fs)) where
     prod :: Q Type -> Q Type -> Q Type
     prod a b = conT ''(:*:) `appT` a `appT` b
-repCon (dt, vs) r@(RecC n []) (t1,t2)  =
+repCon (dt, vs) r@(RecC n []) (t1,t2)  = pure <$>
     conT ''CEq `appT` (conT $ genName [dt, n]) `appT` return t1
                                                `appT` return t2 `appT` conT ''U
-repCon (dt, vs) r@(RecC n fs) (t1,t2) =
+repCon (dt, vs) r@(RecC n fs) (t1,t2) = pure <$>
     conT ''CEq `appT` (conT $ genName [dt, n]) `appT` return t1
                                                `appT` return t2 `appT`
       (foldBal prod (map (repField' (dt, vs) n) fs)) where
     prod :: Q Type -> Q Type -> Q Type
     prod a b = conT ''(:*:) `appT` a `appT` b
 repCon d (InfixC t1 n t2) eqs = repCon d (NormalC n [t1,t2]) eqs
+#if MIN_VERSION_template_haskell(2,11,0)
+repCon (dt, vs) (GadtC ns fs _) (t1,t2) =
+  concat <$> forM ns (\n -> repCon (dt, vs) (NormalC n fs) (t1,t2))
+repCon (dt, vs) (RecGadtC ns fs _) (t1,t2) =
+  concat <$> forM ns (\n -> repCon (dt, vs) (NormalC n (map (\(_,b,t) -> (b,t)) fs)) (t1,t2))
+#endif
 
 --dataDeclToType :: (Name, [Name]) -> Type
 --dataDeclToType (dt, vs) = foldl (\a b -> AppT a (VarT b)) (ConT dt) vs
@@ -511,10 +584,18 @@ mkFrom ns m i n =
       let wrapE e = e -- lrE m i e
       i <- reify n
       let b = case i of
+#if MIN_VERSION_template_haskell(2,11,0)
+                TyConI (DataD _ dt vs _ cs _) ->
+#else
                 TyConI (DataD _ dt vs cs _) ->
+#endif
                   zipWith (fromCon wrapE ns (dt, map tyVarBndrToName vs)
                     (length cs)) [1..] cs
+#if MIN_VERSION_template_haskell(2,11,0)
+                TyConI (NewtypeD _ dt vs _ c _) ->
+#else
                 TyConI (NewtypeD _ dt vs c _) ->
+#endif
                   [fromCon wrapE ns (dt, map tyVarBndrToName vs) 1 0 c]
                 TyConI (TySynD t _ _) -> error "type synonym?"
                   -- [clause [varP (field 0)] (normalB (wrapE $ conE 'K1 `appE` varE (field 0))) []]
@@ -528,10 +609,18 @@ mkTo ns m i n =
       let wrapP p = p -- lrP m i p
       i <- reify n
       let b = case i of
+#if MIN_VERSION_template_haskell(2,11,0)
+                TyConI (DataD _ dt vs _ cs _) ->
+#else
                 TyConI (DataD _ dt vs cs _) ->
+#endif
                   zipWith (toCon wrapP ns (dt, map tyVarBndrToName vs)
                     (length cs)) [1..] cs
+#if MIN_VERSION_template_haskell(2,11,0)
+                TyConI (NewtypeD _ dt vs _ c _) ->
+#else
                 TyConI (NewtypeD _ dt vs c _) ->
+#endif
                   [toCon wrapP ns (dt, map tyVarBndrToName vs) 1 0 c]
                 TyConI (TySynD t _ _) -> error "type synonym?"
                   -- [clause [wrapP $ conP 'K1 [varP (field 0)]] (normalB $ varE (field 0)) []]
@@ -564,6 +653,15 @@ fromCon wrap ns (dt, vs) m i r@(RecC cn fs) =
   where prod x y = conE '(:*:) `appE` x `appE` y
 fromCon wrap ns (dt, vs) m i (InfixC t1 cn t2) =
   fromCon wrap ns (dt, vs) m i (NormalC cn [t1,t2])
+#if MIN_VERSION_template_haskell(2,11,0)
+fromCon wrap ns (dt, vs) m i (GadtC [n] fs _) =
+  fromCon wrap ns (dt, vs) m i (NormalC n fs)
+fromCon wrap ns (dt, vs) m i (RecGadtC [n] fs _) =
+  fromCon wrap ns (dt, vs) m i (NormalC n (map (\(_,b,t) -> (b,t)) fs))
+fromCon wrap ns (dt, vs) m i _ =
+  error "This constructor is not supported"
+#endif
+
 
 fromField :: (Name, [Name]) -> Int -> Type -> Q Exp
 --fromField (dt, vs) nr t | t == dataDeclToType (dt, vs) = conE 'I `appE` varE (field nr)
@@ -595,6 +693,14 @@ toCon wrap ns (dt, vs) m i r@(RecC cn fs) =
   where prod x y = conP '(:*:) [x,y]
 toCon wrap ns (dt, vs) m i (InfixC t1 cn t2) =
   toCon wrap ns (dt, vs) m i (NormalC cn [t1,t2])
+#if MIN_VERSION_template_haskell(2,11,0)
+toCon wrap ns (dt, vs) m i (GadtC [n] fs _) =
+  toCon wrap ns (dt, vs) m i (NormalC n fs)
+toCon wrap ns (dt, vs) m i (RecGadtC [n] fs _) =
+  toCon wrap ns (dt, vs) m i (NormalC n (map (\(_,b,t) -> (b,t)) fs))
+toCon wrap ns (dt, vs) m i _ =
+  error "This constructor is not supported"
+#endif
 
 toField :: (Name, [Name]) -> Int -> Type -> Q Pat
 --toField (dt, vs) nr t | t == dataDeclToType (dt, vs) = conP 'I [varP (field nr)]
